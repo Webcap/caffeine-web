@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import { mixpanelInit, trackEvent } from "@/lib/mixpanel";
 
 export default function Home() {
   const [scrolled, setScrolled] = useState(false);
@@ -37,6 +38,12 @@ export default function Home() {
         const url = data.update_download_url || data.update_store_url;
         if (url && url !== "") {
           setApkUrl(url);
+        }
+
+        // Initialize Mixpanel
+        if (data.mixpanel_token) {
+          mixpanelInit(data.mixpanel_token);
+          trackEvent("Web App Started");
         }
       } catch (e) {
         console.error("Failed to fetch APK config:", e);
