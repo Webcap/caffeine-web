@@ -9,6 +9,18 @@ export default function Home() {
   const [version, setVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Local posters from /public/assets/posters
+  const localPosters = [
+    "1_Peaky Blinders The Immortal Man.jpg", "2_Project Hail Mary.jpg", "3_How to Make a Killing.jpg",
+    "4_Agent Zeta.jpg", "5_Send Help.jpg", "6_They Will Kill You.jpg", "7_War Machine.jpg",
+    "8_Greenland 2 Migration.jpg", "9_GOAT.jpg", "10_Scream 7.jpg", "11_Avatar Fire and Ash.jpg",
+    "12_Zootopia 2.jpg", "13_Marty Supreme.jpg", "14_Hoppers.jpg", "15_Dhurandhar The Revenge.jpg",
+    "16_The Drama.jpg", "17_Spider-Man Brand New Day.jpg", "18_Ready or Not Here I Come.jpg",
+    "19_Scary Movie.jpg", "20_One Battle After Another.jpg"
+  ].map(name => `/assets/posters/${name}`);
+
+  const marqueePosters = [...localPosters, ...localPosters]; // For seamless scroll
+
   useEffect(() => {
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
@@ -52,28 +64,63 @@ export default function Home() {
 
       {/* Hero Section */}
       <section style={{ 
-        padding: "160px 4rem 100px", 
+        padding: "160px 4rem 140px", 
         display: "flex", 
         flexDirection: "column", 
         alignItems: "center",
         textAlign: "center",
         position: "relative",
-        overflow: "hidden"
+        overflow: "hidden",
+        backgroundColor: "#060606"
       }}>
-        {/* Abstract background glow */}
+        {/* Poster Marquee Background */}
         <div style={{
           position: "absolute",
-          top: "-20%",
-          left: "50%",
-          transform: "translateX(-50%)",
-          width: "800px",
-          height: "600px",
-          background: "radial-gradient(circle, rgba(220, 38, 38, 0.15) 0%, transparent 70%)",
-          zIndex: -1,
-          filter: "blur(80px)"
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 0,
+          opacity: 0.15,
+          pointerEvents: "none",
+          display: "flex",
+          flexDirection: "column",
+          gap: "20px",
+          padding: "40px 0",
+          transform: "rotate(-2deg) scale(1.1)",
+        }}>
+          <div className="marquee-content marquee-left">
+            {marqueePosters.map((url, i) => (
+              <div key={`left-${i}`} className="poster-card">
+                <img src={url} alt="Poster" className="poster-img" loading="lazy" />
+              </div>
+            ))}
+          </div>
+          <div className="marquee-content marquee-right">
+            {marqueePosters.slice().reverse().map((url, i) => (
+              <div key={`right-${i}`} className="poster-card">
+                <img src={url} alt="Poster" className="poster-img" loading="lazy" />
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Gradient Mask Overlay */}
+        <div style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          zIndex: 1,
+          background: `
+            radial-gradient(circle at center, transparent 0%, var(--background) 80%),
+            linear-gradient(to bottom, var(--background) 0%, transparent 20%, transparent 80%, var(--background) 100%)
+          `,
+          pointerEvents: "none"
         }} />
 
-        <div className="animate-fade-in">
+        <div className="animate-fade-in" style={{ position: "relative", zIndex: 2 }}>
           <h1 style={{ fontSize: "clamp(3rem, 8vw, 5rem)", marginBottom: "1.5rem" }}>
             Stream <span className="gradient-text">Everything</span>.<br />
             Anywhere.
@@ -89,48 +136,9 @@ export default function Home() {
           </p>
           <div style={{ display: "flex", gap: "1rem", justifyContent: "center" }}>
             <a href="#download" className="btn-primary glow-pulse">Get Started Now</a>
-            <button className="btn-secondary">View Offerings</button>
           </div>
         </div>
 
-        {/* Mockup Placeholder */}
-        <div className="animate-fade-in" style={{ 
-          marginTop: "80px",
-          width: "100%",
-          maxWidth: "1000px",
-          position: "relative",
-          animationDelay: "0.2s"
-        }}>
-          <div className="glass" style={{
-            borderRadius: "24px 24px 0 0",
-            padding: "20px",
-            background: "rgba(255, 255, 255, 0.02)",
-            borderBottom: "none"
-          }}>
-             <div style={{ 
-               width: "100%", 
-               height: "500px", 
-               background: "#161616", 
-               borderRadius: "12px",
-               display: "flex",
-               alignItems: "center",
-               justifyContent: "center",
-               overflow: "hidden",
-               position: "relative"
-             }}>
-                <Image 
-                  src="/hero-mockup.png" 
-                  alt="Caffeine App Mockup" 
-                  fill 
-                  style={{ objectFit: "cover", opacity: 0.8 }}
-                />
-                <div style={{ zIndex: 1, textAlign: "center", padding: "40px" }}>
-                   <div style={{ fontSize: "2rem", fontWeight: 800, marginBottom: "10px" }}>CAFFEINE</div>
-                   <div style={{ color: "var(--text-muted)" }}>Premium Interface Demonstration</div>
-                </div>
-             </div>
-          </div>
-        </div>
       </section>
 
       {/* Download Section */}
@@ -280,7 +288,10 @@ export default function Home() {
         <div className="logo" style={{ justifyContent: "center", marginBottom: "20px", color: "#fff", opacity: 0.5 }}>
           CAFFEINE <span className="logo-badge" style={{ filter: "grayscale(1)" }}>TV</span>
         </div>
-        <p>&copy; 2026 Webcap Media. All rights reserved.</p>
+        <div style={{ marginBottom: "12px", letterSpacing: "0.05em", fontWeight: 600, fontSize: "0.75rem", color: "rgba(255,255,255,0.3)" }}>
+          ALL MEDIA IS NOT HOSTED ON CAFFEINE SERVERS
+        </div>
+        <p>&copy; 2026 Webcap Media Group. All rights reserved.</p>
       </footer>
     </main>
   );
