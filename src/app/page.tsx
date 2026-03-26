@@ -212,13 +212,8 @@ export default function Home() {
                     target="_blank"
                     rel="noopener noreferrer"
                   >
-                    {loading ? "Discovering..." : (apkUrl ? "Download APK" : "Ready for Deployment")}
+                    {loading ? "Discovering..." : (apkUrl ? "Download APK" : "Download link coming soon")}
                   </a>
-                  {!apkUrl && !loading && (
-                    <div style={{ fontSize: "0.8rem", color: "var(--primary)", fontWeight: 500 }}>
-                       Configure link in Admin Panel
-                    </div>
-                  )}
                </div>
 
                <div style={{ marginTop: "24px", paddingTop: "24px", borderTop: "1px solid var(--glass-border)", fontSize: "0.8rem", color: "#666", display: "flex", justifyContent: "center", gap: "1rem" }}>
