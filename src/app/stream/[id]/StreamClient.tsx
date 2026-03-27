@@ -40,9 +40,10 @@ interface StreamClientProps {
   stream: Stream;
   allStreams: Stream[];
   scoreboards: Record<string, { events: Event[] }>;
+  showScores: boolean;
 }
 
-export default function StreamClient({ stream, allStreams, scoreboards }: StreamClientProps) {
+export default function StreamClient({ stream, allStreams, scoreboards, showScores }: StreamClientProps) {
   const [currentScoreboards, setCurrentScoreboards] = useState(scoreboards);
   const API_URL = process.env.NEXT_PUBLIC_CAFFEINE_API_URL || "https://caffeine-api.vercel.app";
 
@@ -116,27 +117,29 @@ export default function StreamClient({ stream, allStreams, scoreboards }: Stream
           {/* Player & Info */}
           <div>
             {/* Video Player Header */}
-            <div className="glass-panel" style={{ padding: "20px 30px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  {t1Logo && <img src={t1Logo} alt="" style={{ width: "32px", height: "32px" }} />}
-                  <span style={{ fontWeight: 800, fontSize: "1.2rem" }}>{teams[0]}</span>
+            {showScores && (
+              <div className="glass-panel" style={{ padding: "20px 30px", marginBottom: "20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    {t1Logo && <img src={t1Logo} alt="" style={{ width: "32px", height: "32px" }} />}
+                    <span style={{ fontWeight: 800, fontSize: "1.2rem" }}>{teams[0]}</span>
+                  </div>
+                  <span style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontWeight: 900 }}>VS</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    {t2Logo && <img src={t2Logo} alt="" style={{ width: "32px", height: "32px" }} />}
+                    <span style={{ fontWeight: 800, fontSize: "1.2rem" }}>{teams[1]}</span>
+                  </div>
                 </div>
-                <span style={{ color: "var(--text-muted)", fontSize: "0.9rem", fontWeight: 900 }}>VS</span>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  {t2Logo && <img src={t2Logo} alt="" style={{ width: "32px", height: "32px" }} />}
-                  <span style={{ fontWeight: 800, fontSize: "1.2rem" }}>{teams[1]}</span>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "var(--win-green)" }}>
+                    {t1Score} - {t2Score}
+                  </div>
+                  <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 700 }}>
+                    {matchData?.status?.type?.detail || "LIVE"}
+                  </div>
                 </div>
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "var(--win-green)" }}>
-                  {t1Score} - {t2Score}
-                </div>
-                <div style={{ fontSize: "0.8rem", color: "var(--text-muted)", fontWeight: 700 }}>
-                  {matchData?.status?.type?.detail || "LIVE"}
-                </div>
-              </div>
-            </div>
+            )}
 
             {/* Video Player */}
             <div className="glass-panel" style={{ 
@@ -152,7 +155,8 @@ export default function StreamClient({ stream, allStreams, scoreboards }: Stream
                 src={stream.videoUrl} 
                 style={{ width: "100%", height: "100%", border: "none" }}
                 allowFullScreen
-                allow="autoplay; encrypted-media"
+                allow="autoplay; encrypted-media; gyroscope; picture-in-picture; clipboard-write"
+                referrerPolicy="no-referrer"
               />
             </div>
 

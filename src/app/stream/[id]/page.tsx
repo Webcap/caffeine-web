@@ -17,10 +17,14 @@ export default async function StreamPage({ params }: StreamPageProps) {
   let allStreams = [];
   let scoreboards = {};
 
+  let showScores = true;
+  let showLive = true;
+
   try {
-    const [streamsRes, scoreboardsRes] = await Promise.all([
+    const [streamsRes, scoreboardsRes, configRes] = await Promise.all([
       fetch(`${API_URL}/sports/streams`, { cache: 'no-store' }),
-      fetch(`${API_URL}/sports/scoreboard/all`, { cache: 'no-store' })
+      fetch(`${API_URL}/sports/scoreboard/all`, { cache: 'no-store' }),
+      fetch(`${API_URL}/config`, { cache: 'no-store' })
     ]);
 
     if (streamsRes.ok) {
@@ -31,8 +35,19 @@ export default async function StreamPage({ params }: StreamPageProps) {
     if (scoreboardsRes.ok) {
       scoreboards = await scoreboardsRes.json();
     }
+
+    if (configRes.ok) {
+      const config = await configRes.json();
+      showScores = config.web_stream_scores_enabled ?? true;
+      showLive = config.web_live_sports_enabled ?? true;
+    }
   } catch (e) {
-    console.error("Failed to fetch stream data on server:", e);
+    console.error("Failed to fetch stream data or config on server:", e);
+  }
+
+  if (!showLive) {
+    const { redirect } = await import("next/navigation");
+    redirect("/");
   }
 
   if (!stream) {
@@ -44,6 +59,7 @@ export default async function StreamPage({ params }: StreamPageProps) {
       stream={stream} 
       allStreams={allStreams} 
       scoreboards={scoreboards} 
+      showScores={showScores}
     />
   );
 }

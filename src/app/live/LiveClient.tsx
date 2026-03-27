@@ -153,6 +153,11 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
         background: "rgba(255,255,255,0.01)",
         zIndex: 100
       }}>
+        <a href="/" style={{ textDecoration: "none", color: "inherit", marginBottom: "30px" }}>
+          <div className="sidebar-icon" title="Return Home">
+            <span style={{ fontSize: "1.2rem" }}>🏠</span>
+          </div>
+        </a>
         <div className="sidebar-icon active" style={{ marginBottom: "40px" }}>
           <span style={{ fontSize: "1.2rem" }}>📊</span>
         </div>
@@ -180,9 +185,11 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
           marginBottom: "40px"
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-             <div className="logo" style={{ fontSize: "1.8rem" }}>
-                Caffeine Live
-             </div>
+             <a href="/" style={{ textDecoration: "none", color: "inherit" }}>
+                <div className="logo" style={{ fontSize: "1.8rem" }}>
+                   Caffeine Live
+                </div>
+             </a>
           </div>
           
           <div className="glass" style={{ padding: "6px", borderRadius: "14px", display: "flex", gap: "4px" }}>

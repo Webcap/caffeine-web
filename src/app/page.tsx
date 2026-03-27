@@ -9,6 +9,11 @@ export default function Home() {
   const [apkUrl, setApkUrl] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [flags, setFlags] = useState<Record<string, boolean>>({
+    web_hero_marquee_enabled: true,
+    web_live_sports_enabled: true,
+    web_stream_scores_enabled: true
+  });
 
   // Local posters from /public/assets/posters
   const localPosters = [
@@ -40,13 +45,20 @@ export default function Home() {
           setApkUrl(url);
         }
 
+        // Set Feature Flags
+        setFlags({
+          web_hero_marquee_enabled: data.web_hero_marquee_enabled ?? true,
+          web_live_sports_enabled: data.web_live_sports_enabled ?? true,
+          web_stream_scores_enabled: data.web_stream_scores_enabled ?? true
+        });
+
         // Initialize Mixpanel
         if (data.mixpanel_token) {
           mixpanelInit(data.mixpanel_token);
           trackEvent("Web App Started");
         }
       } catch (e) {
-        console.error("Failed to fetch APK config:", e);
+        console.error("Failed to fetch config:", e);
       } finally {
         setLoading(false);
       }
@@ -64,6 +76,9 @@ export default function Home() {
           CAFFEINE <span className="logo-badge">TV</span>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: "2rem", alignItems: "center" }}>
+          {flags.web_live_sports_enabled && (
+             <a href="/live" style={{ fontSize: "0.9rem", opacity: 0.8, color: "var(--accent-blue)", fontWeight: 700 }}>Live</a>
+          )}
           <a href="#features" style={{ fontSize: "0.9rem", opacity: 0.8 }}>Features</a>
           <a href="#download" className="btn-secondary" style={{ padding: "8px 16px", fontSize: "0.9rem" }}>Download</a>
         </div>
@@ -81,36 +96,38 @@ export default function Home() {
         backgroundColor: "#060606"
       }}>
         {/* Poster Marquee Background */}
-        <div style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          zIndex: 0,
-          opacity: 0.15,
-          pointerEvents: "none",
-          display: "flex",
-          flexDirection: "column",
-          gap: "20px",
-          padding: "40px 0",
-          transform: "rotate(-2deg) scale(1.1)",
-        }}>
-          <div className="marquee-content marquee-left">
-            {marqueePosters.map((url, i) => (
-              <div key={`left-${i}`} className="poster-card">
-                <img src={url} alt="Poster" className="poster-img" loading="lazy" />
-              </div>
-            ))}
+        {flags.web_hero_marquee_enabled && (
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 0,
+            opacity: 0.15,
+            pointerEvents: "none",
+            display: "flex",
+            flexDirection: "column",
+            gap: "20px",
+            padding: "40px 0",
+            transform: "rotate(-2deg) scale(1.1)",
+          }}>
+            <div className="marquee-content marquee-left">
+              {marqueePosters.map((url, i) => (
+                <div key={`left-${i}`} className="poster-card">
+                  <img src={url} alt="Poster" className="poster-img" loading="lazy" />
+                </div>
+              ))}
+            </div>
+            <div className="marquee-content marquee-right">
+              {marqueePosters.slice().reverse().map((url, i) => (
+                <div key={`right-${i}`} className="poster-card">
+                  <img src={url} alt="Poster" className="poster-img" loading="lazy" />
+                </div>
+              ))}
+            </div>
           </div>
-          <div className="marquee-content marquee-right">
-            {marqueePosters.slice().reverse().map((url, i) => (
-              <div key={`right-${i}`} className="poster-card">
-                <img src={url} alt="Poster" className="poster-img" loading="lazy" />
-              </div>
-            ))}
-          </div>
-        </div>
+        )}
 
         {/* Gradient Mask Overlay */}
         <div style={{
@@ -266,10 +283,10 @@ export default function Home() {
            gap: "2rem" 
          }}>
             {[
-              { title: "4K HDR Streaming", desc: "Crystal clear quality with ultra-low latency.", icon: "⚡" },
-              { title: "Universal Sync", desc: "Start on your TV, finish on your phone.", icon: "🔄" },
-              { title: "Live Sports", desc: "Never miss a moment with real-time broadcasts.", icon: "⚽" }
-            ].map((feature, i) => (
+              { title: "4K HDR Streaming", desc: "Crystal clear quality with ultra-low latency.", icon: "⚡", enabled: true },
+              { title: "Universal Sync", desc: "Start on your TV, finish on your phone.", icon: "🔄", enabled: true },
+              { title: "Live Sports", desc: "Never miss a moment with real-time broadcasts.", icon: "⚽", enabled: flags.web_live_sports_enabled }
+            ].filter(f => f.enabled).map((feature, i) => (
               <div key={i} className="glass" style={{ padding: "40px", borderRadius: "16px", transition: "var(--transition)" }}>
                  <div style={{ fontSize: "2rem", marginBottom: "20px" }}>{feature.icon}</div>
                  <h3 style={{ marginBottom: "12px" }}>{feature.title}</h3>
