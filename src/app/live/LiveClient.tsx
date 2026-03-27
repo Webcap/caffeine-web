@@ -9,9 +9,23 @@ interface Stream {
   featured?: boolean;
   thumbnailUrl: string;
   videoUrl: string;
+  createdAt?: string;
+  timestamp?: number;
 }
 
-interface Event {
+interface Competitor {
+  id: string;
+  team: {
+    name: string;
+    abbreviation: string;
+    logo: string;
+    displayName: string;
+    shortDisplayName?: string;
+  };
+  score: string;
+}
+
+interface ScoreboardEvent {
   id: string;
   name: string;
   shortName: string;
@@ -23,29 +37,26 @@ interface Event {
     };
   };
   competitions: Array<{
-    competitors: Array<{
-      id: string;
-      team: {
-        name: string;
-        abbreviation: string;
-        logo: string;
-        displayName: string;
-      };
-      score: string;
-    }>;
+    competitors: Competitor[];
   }>;
 }
 
 interface LiveClientProps {
   initialStreams: Stream[];
-  initialScoreboards: Record<string, { events: Event[] }>;
+  initialScoreboards: Record<string, { events: ScoreboardEvent[] }>;
 }
+
+const normalize = (s: string | undefined | null) => s?.toLowerCase().replace(/[^a-z0-9]/g, "") || "";
+
+const isTerminalState = (state: string | undefined) => {
+  const s = state?.toLowerCase();
+  return s === "post" || s === "final" || s === "complete" || s === "closed";
+};
 
 export default function LiveClient({ initialStreams, initialScoreboards }: LiveClientProps) {
   const [streams, setStreams] = useState<Stream[]>(initialStreams);
-  const [scoreboards, setScoreboards] = useState<Record<string, { events: Event[] }>>(initialScoreboards);
+  const [scoreboards, setScoreboards] = useState<Record<string, { events: ScoreboardEvent[] }>>(initialScoreboards);
   const [selectedSport, setSelectedSport] = useState("All");
-  const [loading, setLoading] = useState(false); // No longer strictly "loading" since we have initial data
 
   const API_URL = process.env.NEXT_PUBLIC_CAFFEINE_API_URL || "https://caffeine-api.vercel.app";
 
@@ -79,56 +90,87 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
 
+  const findMatchForStream = (stream: Stream, scoreboardsData: Record<string, { events: ScoreboardEvent[] }>): ScoreboardEvent | null => {
+    const teams = stream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
+    if (teams.length < 2) return null;
+    
+    const t1Norm = normalize(teams[0] || "");
+    const t2Norm = normalize(teams[1] || "");
+
+    let bestEvent: ScoreboardEvent | null = null;
+
+    Object.values(scoreboardsData).forEach(sb => {
+      if (!sb || !sb.events) return;
+      
+      sb.events.forEach(ev => {
+        const comps = ev?.competitions?.[0]?.competitors || [];
+        const hasMatch = (norm: string) => comps.some((c) => {
+          const cn = normalize(c.team?.name);
+          const cfn = normalize(c.team?.displayName);
+          const csn = normalize(c.team?.shortDisplayName || "");
+          return cn.includes(norm) || norm.includes(cn) || cfn.includes(norm) || norm.includes(cfn) || (csn && (csn.includes(norm) || norm.includes(csn)));
+        });
+
+        if (hasMatch(t1Norm) && hasMatch(t2Norm)) {
+          const evState = ev.status?.type?.state;
+          const bestState = bestEvent?.status?.type?.state;
+          
+          if (!bestEvent || 
+              (isTerminalState(evState) && !isTerminalState(bestState)) || 
+              (evState === "in" && !isTerminalState(evState) && bestState === "pre")) {
+            bestEvent = ev as ScoreboardEvent;
+          }
+        }
+      });
+    });
+    return bestEvent;
+  };
+
   const sports = ["All", "NBA", "NFL", "MLB", "NHL", "Soccer"];
-  const dates = [
-    { day: "Mon", date: "21 Jan" },
-    { day: "Tue", date: "22 Jan" },
-    { day: "Wed", date: "23 Jan" },
-    { day: "Thu", date: "24 Jan", active: true },
-    { day: "Fri", date: "25 Jan" },
-    { day: "Sat", date: "26 Jan" },
-    { day: "Sun", date: "27 Jan" },
-  ];
+  
+  const generateDates = () => {
+    const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const result = [];
+    const now = new Date();
+    
+    for (let i = -3; i <= 3; i++) {
+       const d = new Date();
+       d.setDate(now.getDate() + i);
+       result.push({
+         day: days[d.getDay()],
+         date: `${d.getDate()} ${months[d.getMonth()]}`,
+         active: i === 0
+       });
+    }
+    return result;
+  };
+
+  const dates = generateDates();
 
   const filteredStreams = selectedSport === "All" 
     ? streams 
     : streams.filter(s => s.sport.toUpperCase() === selectedSport.toUpperCase());
 
-  const normalize = (s: string) => s?.toLowerCase().replace(/[^a-z0-9]/g, "") || "";
-
-  // Helper to get effective timestamp for sorting
-  const getEffectiveTimestamp = (stream: Stream) => {
-    // Check if we have scoreboard data for this stream
-    const teams = stream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
-    const t1Norm = normalize(teams[0]);
-    const t2Norm = normalize(teams[1]);
-
-    let bestTs = (stream as any).timestamp ? (stream as any).timestamp * 1000 : 0;
-    
-    // Check scoreboards for a matching event
-    Object.values(scoreboards).forEach(sb => {
-      sb?.events?.forEach(ev => {
-        const comps = ev?.competitions?.[0]?.competitors || [];
-        const hasT1 = comps.some((c: any) => normalize(c.team?.name).includes(t1Norm) || t1Norm.includes(normalize(c.team?.name)));
-        const hasT2 = comps.some((c: any) => normalize(c.team?.name).includes(t2Norm) || t2Norm.includes(normalize(c.team?.name)));
-        
-        if (hasT1 && hasT2) {
-          const dateTs = new Date(ev.date).getTime();
-          if (dateTs > 0) bestTs = dateTs;
-        }
-      });
-    });
-    return bestTs;
-  };
-
   // Sort streams by start time
-  const sortedStreams = [...filteredStreams].sort((a, b) => getEffectiveTimestamp(a) - getEffectiveTimestamp(b));
+  const sortedStreams = [...filteredStreams].sort((a, b) => {
+    const ma = findMatchForStream(a, scoreboards);
+    const mb = findMatchForStream(b, scoreboards);
+    
+    const getTs = (s: Stream, m: ScoreboardEvent | null) => {
+      if (m && m.date) return new Date(m.date).getTime();
+      if (s.timestamp) return s.timestamp * 1000;
+      return 0;
+    };
+
+    return getTs(a, ma) - getTs(b, mb);
+  });
 
   const featuredStream = streams.find(s => s.featured);
 
-  // Extract completed games from scoreboards
-  const completedGames = Object.values(scoreboards).flatMap(sb => 
-    sb?.events?.filter(ev => ev.status?.type?.state === "post") || []
+  // Completed matches (status 'post', 'final', 'complete') - keep more for the history sidebar
+  const completedMatches = Object.values(scoreboards).flatMap(sb => 
+    (sb?.events || []).filter(event => isTerminalState(event.status?.type?.state))
   ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
@@ -259,68 +301,48 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                     </div>
                     
                     {(() => {
-                      const normalize = (s: string) => s?.toLowerCase().replace(/[^a-z0-9]/g, "") || "";
-                      const t1Norm = normalize(featuredStream.title.split(/\s+(?:vs|at|VS|AT)\s+/i)[0]);
-                      const t2Norm = normalize(featuredStream.title.split(/\s+(?:vs|at|VS|AT)\s+/i)[1]);
-                      const t1Name = featuredStream.title.split(/\s+(?:vs|at|VS|AT)\s+/i)[0]?.trim();
-                      const t2Name = featuredStream.title.split(/\s+(?:vs|at|VS|AT)\s+/i)[1]?.trim();
+                      if (!featuredStream) return null;
                       
-                      let bestEvent: any = null;
+                      const teams = featuredStream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
+                      const t1Name = teams[0]?.trim() || "";
+                      const t2Name = teams[1]?.trim() || "";
+                      
+                      const featuredMatch = findMatchForStream(featuredStream, scoreboards);
                       let t1Logo = null, t2Logo = null;
-                      let t1Score = null, t2Score = null;
+                      let t1Score: string | null = null, t2Score: string | null = null;
 
-                      if (scoreboards) {
-                        Object.values(scoreboards).forEach(sb => {
-                          sb?.events?.forEach(ev => {
-                            const competitors = ev?.competitions?.[0]?.competitors || [];
-                            const hasT1 = competitors.some((c: any) => {
-                              const cn = normalize(c.team?.name);
-                              const cfn = normalize(c.team?.displayName);
-                              const csn = normalize(c.team?.shortDisplayName);
-                              return cn.includes(t1Norm) || t1Norm.includes(cn) || cfn.includes(t1Norm) || t1Norm.includes(cfn) || csn.includes(t1Norm) || t1Norm.includes(csn);
-                            });
-                            const hasT2 = competitors.some((c: any) => {
-                              const cn = normalize(c.team?.name);
-                              const cfn = normalize(c.team?.displayName);
-                              const csn = normalize(c.team?.shortDisplayName);
-                              return cn.includes(t2Norm) || t2Norm.includes(cn) || cfn.includes(t2Norm) || t2Norm.includes(cfn) || csn.includes(t2Norm) || t2Norm.includes(csn);
-                            });
-
-                            if (hasT1 && hasT2) {
-                              if (!bestEvent || (ev.status?.type?.state === "in" && bestEvent.status?.type?.state !== "in")) {
-                                bestEvent = ev;
-                              }
-                            }
-                          });
-                        });
-
-                        if (bestEvent) {
-                          const comps = bestEvent.competitions?.[0]?.competitors || [];
-                          const c1 = comps.find((c: any) => {
+                      if (featuredMatch) {
+                          const activeMatch = featuredMatch as ScoreboardEvent;
+                          const t1N = normalize(t1Name);
+                          const t2N = normalize(t2Name);
+                          const competitors = activeMatch.competitions?.[0]?.competitors || [];
+                          
+                          const c1 = competitors.find((c: Competitor) => {
                              const cn = normalize(c.team?.name);
                              const cfn = normalize(c.team?.displayName);
-                             return cn.includes(t1Norm) || t1Norm.includes(cn) || cfn.includes(t1Norm) || t1Norm.includes(cfn);
+                             return cn.includes(t1N) || t1N.includes(cn) || cfn.includes(t1N) || t1N.includes(cfn);
                           });
-                          const c2 = comps.find((c: any) => {
+                          const c2 = competitors.find((c: Competitor) => {
                              const cn = normalize(c.team?.name);
                              const cfn = normalize(c.team?.displayName);
-                             return cn.includes(t2Norm) || t2Norm.includes(cn) || cfn.includes(t2Norm) || t2Norm.includes(cfn);
+                             return cn.includes(t2N) || t2N.includes(cn) || cfn.includes(t2N) || t2N.includes(cfn);
                           });
                           
-                          const isLiveOrDone = bestEvent.status?.type?.state === "in" || bestEvent.status?.type?.state === "post";
+                          const s = activeMatch.status?.type?.state?.toLowerCase();
+                          const isLiveOrDone = s === "in" || isTerminalState(s);
                           
                           if (c1) { 
                             t1Logo = c1.team?.logo; 
-                            const s = parseInt(c1.score);
-                            t1Score = isLiveOrDone ? (isNaN(s) ? "0" : Math.max(0, s).toString()) : "0"; 
+                            const sc = parseInt(c1.score);
+                            t1Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
                           }
                           if (c2) { 
                             t2Logo = c2.team?.logo; 
-                            const s = parseInt(c2.score);
-                            t2Score = isLiveOrDone ? (isNaN(s) ? "0" : Math.max(0, s).toString()) : "0"; 
+                            const sc = parseInt(c2.score);
+                            t2Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
                           }
                         }
-                      }
+                      
 
                       return (
                         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "60px", marginBottom: "30px" }}>
@@ -333,9 +355,9 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                           
                           <div style={{ textAlign: "center", minWidth: "150px" }}>
                             <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "var(--text-muted)", marginBottom: "5px" }}>VS</div>
-                            {bestEvent && (
+                            {featuredMatch && (
                               <div className="glass" style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.8rem", fontWeight: 700, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)" }}>
-                                {bestEvent.status.type.state === "pre" ? `Starts ${formatTime(bestEvent.date)}` : bestEvent.status.type.detail}
+                                {(featuredMatch as ScoreboardEvent).status.type.state === "pre" ? `Starts ${formatTime((featuredMatch as ScoreboardEvent).date)}` : (featuredMatch as ScoreboardEvent).status.type.detail}
                               </div>
                             )}
                           </div>
@@ -382,73 +404,66 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                   </thead>
                   <tbody>
                     {sortedStreams.length > 0 ? (
-                      sortedStreams.map((stream, i) => {
-                        const teams = stream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
-                        const t1Norm = normalize(teams[0]);
-                        const t2Norm = normalize(teams[1]);
+                      sortedStreams.filter(stream => {
+                        const currentMatch = findMatchForStream(stream, scoreboards);
+                        const state = currentMatch?.status?.type?.state;
                         
-                        let matchData: any = null;
+                        if (isTerminalState(state)) return false;
+ 
+                        if (!currentMatch) {
+                          const streamDate = new Date(stream.createdAt || (stream.timestamp ? stream.timestamp * 1000 : Date.now()));
+                          const diffHours = (Date.now() - streamDate.getTime()) / (1000 * 60 * 60);
+                          if (diffHours > 12) return false;
+                        } else if (state === 'in' || state === 'pre') {
+                          const activeMatch = currentMatch as ScoreboardEvent;
+                          const startTime = new Date(activeMatch.date);
+                          const diffHours = (Date.now() - startTime.getTime()) / (1000 * 60 * 60);
+                          
+                          const competitors = activeMatch.competitions?.[0]?.competitors || [];
+                          const score1 = parseInt(competitors[0]?.score || "0");
+                          const score2 = parseInt(competitors[1]?.score || "0");
+                          if (diffHours > 6 && score1 === 0 && score2 === 0) return false;
+                        }
+                        return true;
+                      }).map((stream) => {
+                        const teams = stream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
+                        const t1N = normalize(teams[0]);
+                        const t2N = normalize(teams[1]);
+                        
+                        const currentMatch = findMatchForStream(stream, scoreboards);
                         let t1Logo = null, t2Logo = null;
                         let t1Score = "0", t2Score = "0";
 
-
-                        // Lookup scoreboard data for this specific stream
-                        Object.values(scoreboards).forEach(sb => {
-                          sb?.events?.forEach(ev => {
-                            const comps = ev?.competitions?.[0]?.competitors || [];
-                            const hasMatch = (norm: string) => comps.some((c: any) => {
-                              const cn = normalize(c.team?.name);
-                              const cfn = normalize(c.team?.displayName);
-                              const csn = normalize(c.team?.shortDisplayName);
-                              return cn.includes(norm) || norm.includes(cn) || cfn.includes(norm) || norm.includes(cfn) || csn.includes(norm) || norm.includes(csn);
-                            });
-
-                            if (hasMatch(t1Norm) && hasMatch(t2Norm)) {
-                              if (!matchData || (ev.status?.type?.state === "in" && matchData.status?.type?.state !== "in")) {
-                                matchData = ev;
-                              }
-                            }
-                          });
-                        });
-
-                        if (matchData) {
-                          // Filter out completed matches from the live table
-                          if ((matchData as any).status?.type?.state === "post") {
-                            return null;
-                          }
-
-                          const comps = (matchData as any).competitions[0].competitors;
-                          const hasMatch = (norm: string) => comps.find((c: any) => {
+                        if (currentMatch) {
+                          const activeMatch = currentMatch as ScoreboardEvent;
+                          const competitors = activeMatch.competitions?.[0]?.competitors || [];
+                          const c1 = competitors.find((c: Competitor) => {
                              const cn = normalize(c.team?.name);
                              const cfn = normalize(c.team?.displayName);
                              const csn = normalize(c.team?.shortDisplayName);
-                             return cn.includes(norm) || norm.includes(cn) || cfn.includes(norm) || norm.includes(cfn) || csn.includes(norm) || norm.includes(csn);
+                             return cn.includes(t1N) || t1N.includes(cn) || cfn.includes(t1N) || t1N.includes(cfn) || (csn && (csn.includes(t1N) || t1N.includes(csn)));
                           });
-
-                          const c1 = hasMatch(t1Norm);
-                          const c2 = hasMatch(t2Norm);
+                          const c2 = competitors.find((c: Competitor) => {
+                             const cn = normalize(c.team?.name);
+                             const cfn = normalize(c.team?.displayName);
+                             const csn = normalize(c.team?.shortDisplayName);
+                             return cn.includes(t2N) || t2N.includes(cn) || cfn.includes(t2N) || t2N.includes(cfn) || (csn && (csn.includes(t2N) || t2N.includes(csn)));
+                          });
                           
-                          const isLiveOrDone = (matchData as any).status?.type?.state === "in" || (matchData as any).status?.type?.state === "post";
+                          const s = activeMatch.status?.type?.state?.toLowerCase();
+                          const isLiveOrDone = s === "in" || isTerminalState(s);
                           
                           t1Logo = c1?.team?.logo;
                           t2Logo = c2?.team?.logo;
                           
-                          const s1 = parseInt(c1?.score || "0");
-                          const s2 = parseInt(c2?.score || "0");
+                          const sc1 = parseInt(c1?.score || "0");
+                          const sc2 = parseInt(c2?.score || "0");
                           
-                          t1Score = isLiveOrDone ? (isNaN(s1) ? "0" : Math.max(0, s1).toString()) : "0";
-                          t2Score = isLiveOrDone ? (isNaN(s2) ? "0" : Math.max(0, s2).toString()) : "0";
-                        } else {
-                          // If no match found, check if the stream is too old (fallback)
-                          const streamTs = (stream as any).timestamp;
-                          if (streamTs && (Date.now() / 1000) - streamTs > 43200) { // 12 hours
-                            return null;
-                          }
-                          // Also hide if it has no timestamp at all (likely old garbage)
-                          if (!streamTs) return null;
-                        }
+                          t1Score = isLiveOrDone ? (isNaN(sc1) ? "0" : Math.max(0, sc1).toString()) : "0";
+                          t2Score = isLiveOrDone ? (isNaN(sc2) ? "0" : Math.max(0, sc2).toString()) : "0";
+                        } 
 
-                        const startTime = matchData ? formatTime(matchData.date) : formatTime(new Date((stream as any).timestamp * 1000).toISOString());
+                        const startTime = currentMatch ? formatTime(currentMatch.date) : formatTime(stream.timestamp ? new Date(stream.timestamp * 1000).toISOString() : undefined);
 
                         return (
                           <tr key={stream.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)", transition: "var(--transition)" }} className="table-row-hover">
@@ -484,7 +499,7 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                             <td style={{ padding: "20px 12px" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                 <span className="pulse-live" style={{ width: "6px", height: "6px" }}></span>
-                                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>{matchData?.status?.type?.detail || "LiveNow"}</span>
+                                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>{currentMatch?.status?.type?.detail || "LiveNow"}</span>
                               </div>
                             </td>
                             <td style={{ padding: "20px 12px", textAlign: "right" }}>
@@ -520,15 +535,16 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
              <div className="glass-panel" style={{ padding: "30px" }}>
                 <h2 style={{ fontSize: "1.2rem", marginBottom: "24px" }}>Completed</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
-                  {completedGames.length > 0 ? (
-                    completedGames.slice(0, 8).map(game => {
-                      const c1 = game.competitions[0].competitors[0];
-                      const c2 = game.competitions[0].competitors[1];
+                  {completedMatches.length > 0 ? (
+                    completedMatches.slice(0, 8).map(game => {
+                      const activeGame = game as ScoreboardEvent;
+                      const c1 = activeGame.competitions[0].competitors[0];
+                      const c2 = activeGame.competitions[0].competitors[1];
                       return (
-                        <div key={game.id} className="glass" style={{ padding: "15px", borderRadius: "16px", transition: "var(--transition)" }}>
+                        <div key={activeGame.id} className="glass" style={{ padding: "15px", borderRadius: "16px", transition: "var(--transition)" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px" }}>
-                            <span>{game.status.type.detail}</span>
-                            <span>{new Date(game.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                            <span>{activeGame.status.type.detail}</span>
+                            <span>{new Date(activeGame.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
