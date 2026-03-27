@@ -70,6 +70,14 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
   }, [API_URL]);
+  
+  // Date formatting helper
+  const formatTime = (dateStr?: string) => {
+    if (!dateStr) return "--:--";
+    const date = new Date(dateStr);
+    if (isNaN(date.getTime())) return "--:--";
+    return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+  };
 
   const sports = ["All", "NBA", "NFL", "MLB", "NHL", "Soccer"];
   const dates = [
@@ -117,6 +125,11 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
   const sortedStreams = [...filteredStreams].sort((a, b) => getEffectiveTimestamp(a) - getEffectiveTimestamp(b));
 
   const featuredStream = streams.find(s => s.featured);
+
+  // Extract completed games from scoreboards
+  const completedGames = Object.values(scoreboards).flatMap(sb => 
+    sb?.events?.filter(ev => ev.status?.type?.state === "post") || []
+  ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
   return (
     <div style={{ 
@@ -168,7 +181,7 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
              <div className="logo" style={{ fontSize: "1.8rem" }}>
-                ScorePulse <span style={{ color: "var(--accent-blue)", fontSize: "0.8rem", opacity: 0.5 }}>by Caffeine</span>
+                Caffeine Live
              </div>
           </div>
           
@@ -287,8 +300,18 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                              return cn.includes(t2Norm) || t2Norm.includes(cn) || cfn.includes(t2Norm) || t2Norm.includes(cfn);
                           });
                           
-                          if (c1) { t1Logo = c1.team?.logo; t1Score = c1.score; }
-                          if (c2) { t2Logo = c2.team?.logo; t2Score = c2.score; }
+                          const isLiveOrDone = bestEvent.status?.type?.state === "in" || bestEvent.status?.type?.state === "post";
+                          
+                          if (c1) { 
+                            t1Logo = c1.team?.logo; 
+                            const s = parseInt(c1.score);
+                            t1Score = isLiveOrDone ? (isNaN(s) ? "0" : Math.max(0, s).toString()) : "0"; 
+                          }
+                          if (c2) { 
+                            t2Logo = c2.team?.logo; 
+                            const s = parseInt(c2.score);
+                            t2Score = isLiveOrDone ? (isNaN(s) ? "0" : Math.max(0, s).toString()) : "0"; 
+                          }
                         }
                       }
 
@@ -305,7 +328,7 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                             <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "var(--text-muted)", marginBottom: "5px" }}>VS</div>
                             {bestEvent && (
                               <div className="glass" style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.8rem", fontWeight: 700, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)" }}>
-                                {bestEvent.status.type.detail}
+                                {bestEvent.status.type.state === "pre" ? `Starts ${formatTime(bestEvent.date)}` : bestEvent.status.type.detail}
                               </div>
                             )}
                           </div>
@@ -337,7 +360,7 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
 
             {/* Tables Area */}
             <section>
-              <h2 style={{ fontSize: "1.4rem", marginBottom: "24px" }}>{selectedSport === "All" ? "Live Streamed Matches" : `${selectedSport} Live Games`}</h2>
+              <h2 style={{ fontSize: "1.4rem", marginBottom: "24px" }}>{selectedSport === "All" ? "Live Now" : `${selectedSport} Live Games`}</h2>
               <div className="glass-panel" style={{ padding: "30px", overflowX: "auto" }}>
                 <table style={{ width: "100%", borderCollapse: "collapse" }}>
                   <thead>
@@ -361,14 +384,19 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                         let t1Logo = null, t2Logo = null;
                         let t1Score = "0", t2Score = "0";
 
+
                         // Lookup scoreboard data for this specific stream
                         Object.values(scoreboards).forEach(sb => {
                           sb?.events?.forEach(ev => {
                             const comps = ev?.competitions?.[0]?.competitors || [];
-                            const hasT1 = comps.some((c: any) => normalize(c.team?.name).includes(t1Norm) || t1Norm.includes(normalize(c.team?.name)));
-                            const hasT2 = comps.some((c: any) => normalize(c.team?.name).includes(t2Norm) || t2Norm.includes(normalize(c.team?.name)));
-                            
-                            if (hasT1 && hasT2) {
+                            const hasMatch = (norm: string) => comps.some((c: any) => {
+                              const cn = normalize(c.team?.name);
+                              const cfn = normalize(c.team?.displayName);
+                              const csn = normalize(c.team?.shortDisplayName);
+                              return cn.includes(norm) || norm.includes(cn) || cfn.includes(norm) || norm.includes(cfn) || csn.includes(norm) || norm.includes(csn);
+                            });
+
+                            if (hasMatch(t1Norm) && hasMatch(t2Norm)) {
                               if (!matchData || (ev.status?.type?.state === "in" && matchData.status?.type?.state !== "in")) {
                                 matchData = ev;
                               }
@@ -377,27 +405,51 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                         });
 
                         if (matchData) {
+                          // Filter out completed matches from the live table
+                          if ((matchData as any).status?.type?.state === "post") {
+                            return null;
+                          }
+
                           const comps = (matchData as any).competitions[0].competitors;
-                          const c1 = comps.find((c: any) => normalize(c.team?.name).includes(t1Norm) || t1Norm.includes(normalize(c.team?.name)));
-                          const c2 = comps.find((c: any) => normalize(c.team?.name).includes(t2Norm) || t2Norm.includes(normalize(c.team?.name)));
+                          const hasMatch = (norm: string) => comps.find((c: any) => {
+                             const cn = normalize(c.team?.name);
+                             const cfn = normalize(c.team?.displayName);
+                             const csn = normalize(c.team?.shortDisplayName);
+                             return cn.includes(norm) || norm.includes(cn) || cfn.includes(norm) || norm.includes(cfn) || csn.includes(norm) || norm.includes(csn);
+                          });
+
+                          const c1 = hasMatch(t1Norm);
+                          const c2 = hasMatch(t2Norm);
+                          
+                          const isLiveOrDone = (matchData as any).status?.type?.state === "in" || (matchData as any).status?.type?.state === "post";
+                          
                           t1Logo = c1?.team?.logo;
                           t2Logo = c2?.team?.logo;
-                          t1Score = c1?.score || "0";
-                          t2Score = c2?.score || "0";
+                          
+                          const s1 = parseInt(c1?.score || "0");
+                          const s2 = parseInt(c2?.score || "0");
+                          
+                          t1Score = isLiveOrDone ? (isNaN(s1) ? "0" : Math.max(0, s1).toString()) : "0";
+                          t2Score = isLiveOrDone ? (isNaN(s2) ? "0" : Math.max(0, s2).toString()) : "0";
+                        } else {
+                          // If no match found, check if the stream is too old (fallback)
+                          const streamTs = (stream as any).timestamp;
+                          if (streamTs && (Date.now() / 1000) - streamTs > 43200) { // 12 hours
+                            return null;
+                          }
+                          // Also hide if it has no timestamp at all (likely old garbage)
+                          if (!streamTs) return null;
                         }
 
-                        const formatTime = (dateStr?: string, unixTimestamp?: number) => {
-                          const date = dateStr ? new Date(dateStr) : (unixTimestamp ? new Date(unixTimestamp * 1000) : null);
-                          if (!date) return "--:--";
-                          return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
-                        };
-
-                        const startTime = formatTime(matchData?.date, (stream as any).timestamp);
+                        const startTime = matchData ? formatTime(matchData.date) : formatTime(new Date((stream as any).timestamp * 1000).toISOString());
 
                         return (
                           <tr key={stream.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)", transition: "var(--transition)" }} className="table-row-hover">
                             <td style={{ padding: "20px 12px" }}>
-                              <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text-muted)" }}>{startTime}</span>
+                              <div style={{ display: "flex", flexDirection: "column" }}>
+                                <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--accent-blue)" }}>{startTime}</span>
+                                <span style={{ fontSize: "0.65rem", color: "var(--text-muted)", textTransform: "uppercase" }}>Local Time</span>
+                              </div>
                             </td>
                             <td style={{ padding: "20px 12px" }}>
                               <span style={{ fontSize: "0.8rem", color: "var(--accent-blue)", fontWeight: 700, textTransform: "uppercase" }}>{stream.sport}</span>
@@ -457,30 +509,44 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
 
           {/* Sidebar Area */}
           <aside style={{ display: "flex", flexDirection: "column", gap: "30px" }}>
-             <div className="glass-panel" style={{ padding: "30px" }}>
-                <h2 style={{ fontSize: "1.2rem", marginBottom: "24px" }}>Live Matches</h2>
-                <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                  {streams.length > 0 ? (
-                    streams.slice(0, 4).map(stream => (
-                      <div key={stream.id} className="glass" style={{ padding: "15px", borderRadius: "16px", cursor: "pointer", transition: "var(--transition)" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px" }}>
-                          <span>{stream.sport}</span>
-                          <span style={{ color: "#ef4444", fontWeight: 700 }}>LIVE</span>
-                        </div>
-                        <h4 style={{ fontSize: "0.95rem" }}>{stream.title}</h4>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ textAlign: "center", color: "var(--text-muted)", fontSize: "0.9rem" }}>No streams currently</div>
-                  )}
-                </div>
-             </div>
 
              <div className="glass-panel" style={{ padding: "30px" }}>
-                <h2 style={{ fontSize: "1.2rem", marginBottom: "24px" }}>Upcoming</h2>
-                <div style={{ padding: "40px 20px", textAlign: "center", opacity: 0.3 }}>
-                  <div style={{ fontSize: "2rem", marginBottom: "10px" }}>🔔</div>
-                  <p style={{ fontSize: "0.9rem" }}>Notifications active</p>
+                <h2 style={{ fontSize: "1.2rem", marginBottom: "24px" }}>Completed</h2>
+                <div style={{ display: "flex", flexDirection: "column", gap: "15px" }}>
+                  {completedGames.length > 0 ? (
+                    completedGames.slice(0, 8).map(game => {
+                      const c1 = game.competitions[0].competitors[0];
+                      const c2 = game.competitions[0].competitors[1];
+                      return (
+                        <div key={game.id} className="glass" style={{ padding: "15px", borderRadius: "16px", transition: "var(--transition)" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px" }}>
+                            <span>{game.status.type.detail}</span>
+                            <span>{new Date(game.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                          </div>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                {c1.team.logo && <img src={c1.team.logo} alt="" style={{ width: "20px", height: "20px" }} />}
+                                <span style={{ fontSize: "0.9rem", fontWeight: parseInt(c1.score) > parseInt(c2.score) ? 700 : 400 }}>{c1.team.abbreviation || c1.team.name}</span>
+                              </div>
+                              <span style={{ fontWeight: 800, color: parseInt(c1.score) > parseInt(c2.score) ? "var(--win-green)" : "inherit" }}>{c1.score}</span>
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                                {c2.team.logo && <img src={c2.team.logo} alt="" style={{ width: "20px", height: "20px" }} />}
+                                <span style={{ fontSize: "0.9rem", fontWeight: parseInt(c2.score) > parseInt(c1.score) ? 700 : 400 }}>{c2.team.abbreviation || c2.team.name}</span>
+                              </div>
+                              <span style={{ fontWeight: 800, color: parseInt(c2.score) > parseInt(c1.score) ? "var(--win-green)" : "inherit" }}>{c2.score}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div style={{ padding: "20px", textAlign: "center", opacity: 0.3 }}>
+                      <p style={{ fontSize: "0.9rem" }}>No completed games yet</p>
+                    </div>
+                  )}
                 </div>
              </div>
           </aside>

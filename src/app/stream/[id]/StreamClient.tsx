@@ -89,10 +89,17 @@ export default function StreamClient({ stream, allStreams, scoreboards }: Stream
     const comps = matchData.competitions[0].competitors;
     const c1 = comps.find((c: any) => normalize(c.team?.name).includes(t1Norm) || t1Norm.includes(normalize(c.team?.name)));
     const c2 = comps.find((c: any) => normalize(c.team?.name).includes(t2Norm) || t2Norm.includes(normalize(c.team?.name)));
+    
+    const isLiveOrDone = matchData.status?.type?.state === "in" || matchData.status?.type?.state === "post";
+    
     t1Logo = c1?.team?.logo;
     t2Logo = c2?.team?.logo;
-    t1Score = c1?.score || "0";
-    t2Score = c2?.score || "0";
+    
+    const s1 = parseInt(c1?.score || "0");
+    const s2 = parseInt(c2?.score || "0");
+    
+    t1Score = isLiveOrDone ? (isNaN(s1) ? "0" : Math.max(0, s1).toString()) : "0";
+    t2Score = isLiveOrDone ? (isNaN(s2) ? "0" : Math.max(0, s2).toString()) : "0";
   }
 
   const otherGames = allStreams.filter(s => s.id !== stream.id).slice(0, 6);
