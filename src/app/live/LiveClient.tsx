@@ -101,13 +101,17 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return "--:--";
 
-    // ESPN often uses 04:00Z (12:00 AM ET) as a placeholder for games on the current day
+    // ESPN often uses 04:00Z (12:00 AM ET) or similar as a placeholder for games
     // if the exact time isn't confirmed yet in the 'date' field.
-    // However, the 'detail' string often contains the correctly localized time.
-    if (detail && date.getUTCHours() === 4 && date.getUTCMinutes() === 0) {
+    // If we have a detail string with a clear time (e.g. "1:00 PM"), we prioritize that.
+    if (detail) {
       const timeMatch = detail.match(/(\d{1,2}:\d{2}\s?(?:AM|PM))/i);
-      if (timeMatch) return timeMatch[1].toUpperCase();
+      // Only override if the original date looks like a day-placeholder (top of hour, 0 minutes)
+      if (timeMatch && date.getUTCMinutes() === 0) {
+        return timeMatch[1].toUpperCase();
+      }
     }
+
 
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
@@ -513,10 +517,13 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                         const statusDetail = currentMatch?.status?.type?.detail || "LiveNow";
                         let startTime = currentMatch ? formatTime(currentMatch.date, statusDetail) : formatTime(stream.timestamp ? new Date(stream.timestamp * 1000).toISOString() : undefined);
                         
-                        // Prevent confusing "12:00 AM" discovery placeholders when matching fails
-                        if (!currentMatch && startTime === "12:00 AM") {
+                        // Prevent confusing "12:00 AM" discovery placeholders when matching fails.
+                        // We use a regex to handle different space characters (like narrow non-breaking space)
+                        // and case variations that toLocaleTimeString might produce.
+                        if (!currentMatch && /^12:00\s?(AM|PM)$/i.test(startTime.replace(/\s/g, " "))) {
                           startTime = "Upcoming";
                         }
+
 
                         
                         const matchState = currentMatch?.status?.type?.state?.toLowerCase() || "";
