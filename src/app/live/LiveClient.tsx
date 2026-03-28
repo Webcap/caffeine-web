@@ -46,7 +46,17 @@ interface LiveClientProps {
   initialScoreboards: Record<string, { events: ScoreboardEvent[] }>;
 }
 
-const normalize = (s: string | undefined | null) => s?.toLowerCase().replace(/[^a-z0-9]/g, "") || "";
+const normalize = (s: string | undefined | null) => {
+  if (!s) return "";
+  let n = s.toLowerCase();
+  // Strip sport prefixes (e.g., "NHL: ", "NBA - ")
+  n = n.replace(/^(?:nhl|nba|mlb|nfl|ufc|mma|soccer|football|basketball|hockey)[:\s-]+/, "");
+  // Strip common stream noise
+  n = n.replace(/\b(?:live|hd|stream|full\s?game|free|watch|online|coverage|exclusive|tv)\b/g, " ");
+  // Final alphanumeric only
+  return n.replace(/[^a-z0-9]/g, "");
+};
+
 
 const isTerminalState = (state: string | undefined) => {
   const s = state?.toLowerCase() || "";
@@ -86,12 +96,22 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
   }, [API_URL]);
   
   // Date formatting helper
-  const formatTime = (dateStr?: string) => {
+  const formatTime = (dateStr?: string, detail?: string) => {
     if (!dateStr) return "--:--";
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return "--:--";
+
+    // ESPN often uses 04:00Z (12:00 AM ET) as a placeholder for games on the current day
+    // if the exact time isn't confirmed yet in the 'date' field.
+    // However, the 'detail' string often contains the correctly localized time.
+    if (detail && date.getUTCHours() === 4 && date.getUTCMinutes() === 0) {
+      const timeMatch = detail.match(/(\d{1,2}:\d{2}\s?(?:AM|PM))/i);
+      if (timeMatch) return timeMatch[1].toUpperCase();
+    }
+
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
+
 
   const findMatchForStream = (stream: Stream, scoreboardsData: Record<string, { events: ScoreboardEvent[] }>): ScoreboardEvent | null => {
     const teams = stream.title.split(/\s+(?:vs\.?|at|@|v\.?|VS\.?|AT|V\.?)\s+/i);
@@ -490,9 +510,21 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                           t2Score = isLiveOrDone ? (isNaN(sc2) ? "0" : Math.max(0, sc2).toString()) : "0";
                         } 
 
-                        const startTime = currentMatch ? formatTime(currentMatch.date) : formatTime(stream.timestamp ? new Date(stream.timestamp * 1000).toISOString() : undefined);
+                        const statusDetail = currentMatch?.status?.type?.detail || "LiveNow";
+                        let startTime = currentMatch ? formatTime(currentMatch.date, statusDetail) : formatTime(stream.timestamp ? new Date(stream.timestamp * 1000).toISOString() : undefined);
+                        
+                        // Prevent confusing "12:00 AM" discovery placeholders when matching fails
+                        if (!currentMatch && startTime === "12:00 AM") {
+                          startTime = "Upcoming";
+                        }
+
+                        
+                        const matchState = currentMatch?.status?.type?.state?.toLowerCase() || "";
+                        const isLive = matchState === "in" || matchState.includes("status_in") || matchState.includes("halftime") || matchState.includes("period");
+                        const isUpcoming = matchState === "pre" || matchState.includes("status_scheduled");
 
                         return (
+
                           <tr key={stream.id} style={{ borderTop: "1px solid rgba(255,255,255,0.05)", transition: "var(--transition)" }} className="table-row-hover">
                             <td style={{ padding: "20px 12px" }}>
                               <div style={{ display: "flex", flexDirection: "column" }}>
@@ -525,10 +557,13 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                             </td>
                             <td style={{ padding: "20px 12px" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                <span className="pulse-live" style={{ width: "6px", height: "6px" }}></span>
-                                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>{currentMatch?.status?.type?.detail || "LiveNow"}</span>
+                                {isLive && <span className="pulse-live" style={{ width: "6px", height: "6px" }}></span>}
+                                <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>
+                                  {isUpcoming ? (statusDetail === "LiveNow" ? "Scheduled" : statusDetail) : statusDetail}
+                                </span>
                               </div>
                             </td>
+
                             <td style={{ padding: "20px 12px", textAlign: "right" }}>
                               <a href={`/stream/${stream.id}`} className="glass" style={{ 
                                 padding: "8px 16px", 

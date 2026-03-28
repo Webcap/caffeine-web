@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import { mixpanelInit, trackEvent } from "@/lib/mixpanel";
+import VersionDisplay from "@/components/VersionDisplay";
+
 
 export default function Home() {
   const [scrolled, setScrolled] = useState(false);
@@ -196,9 +198,10 @@ export default function Home() {
             <div className="glass animate-fade-in" style={{ padding: "40px", borderRadius: "24px", textAlign: "center", position: "relative" }}>
                {version && (
                  <div style={{ position: "absolute", top: "20px", right: "20px" }}>
-                   <span className="badge">v{version}</span>
+                   <VersionDisplay version={version} />
                  </div>
                )}
+
                <div style={{ 
                  fontSize: "3rem", 
                  marginBottom: "20px",
