@@ -49,8 +49,11 @@ interface LiveClientProps {
 const normalize = (s: string | undefined | null) => s?.toLowerCase().replace(/[^a-z0-9]/g, "") || "";
 
 const isTerminalState = (state: string | undefined) => {
-  const s = state?.toLowerCase();
-  return s === "post" || s === "final" || s === "complete" || s === "closed";
+  const s = state?.toLowerCase() || "";
+  return s === "post" || s === "final" || s === "complete" || s === "closed" || s === "canceled" ||
+         s.includes("status_final") || s.includes("status_post") || 
+         s.includes("status_closed") || s.includes("status_complete") ||
+         s.includes("status_canceled");
 };
 
 export default function LiveClient({ initialStreams, initialScoreboards }: LiveClientProps) {
@@ -91,7 +94,7 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
   };
 
   const findMatchForStream = (stream: Stream, scoreboardsData: Record<string, { events: ScoreboardEvent[] }>): ScoreboardEvent | null => {
-    const teams = stream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
+    const teams = stream.title.split(/\s+(?:vs\.?|at|@|v\.?|VS\.?|AT|V\.?)\s+/i);
     if (teams.length < 2) return null;
     
     const t1Norm = normalize(teams[0] || "");
@@ -112,12 +115,23 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
         });
 
         if (hasMatch(t1Norm) && hasMatch(t2Norm)) {
-          const evState = ev.status?.type?.state;
-          const bestState = bestEvent?.status?.type?.state;
+          const evState = ev.status?.type?.state?.toLowerCase();
+          const bestState = bestEvent?.status?.type?.state?.toLowerCase();
           
-          if (!bestEvent || 
-              (isTerminalState(evState) && !isTerminalState(bestState)) || 
-              (evState === "in" && !isTerminalState(evState) && bestState === "pre")) {
+          const getStateScore = (s: string | undefined) => {
+            if (!s) return 0;
+            if (s === "in" || s.includes("status_in")) return 3; // Best: Live
+            if (s === "pre" || s.includes("status_scheduled")) return 2; // Second: Upcoming
+            if (isTerminalState(s)) return -1; // Lowest: Finished
+            return 1; // Unknown but not finished
+          };
+
+          const evScore = getStateScore(evState);
+          const bestScore = getStateScore(bestState);
+
+          // Always prefer higher score (Live > Upcoming > Finished)
+          // If scores equal, prefer the one with a more recent date/timestamp
+          if (!bestEvent || evScore > bestScore || (evScore === bestScore && new Date(ev.date) > new Date(bestEvent.date))) {
             bestEvent = ev as ScoreboardEvent;
           }
         }
@@ -172,6 +186,40 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
   const completedMatches = Object.values(scoreboards).flatMap(sb => 
     (sb?.events || []).filter(event => isTerminalState(event.status?.type?.state))
   ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // Final filtered list for the "Live Now" table
+  const liveStreams = sortedStreams.filter(stream => {
+    const currentMatch = findMatchForStream(stream, scoreboards);
+    const state = currentMatch?.status?.type?.state;
+    
+    if (isTerminalState(state)) return false;
+
+    if (!currentMatch) {
+      const streamDate = new Date(stream.createdAt || (stream.timestamp ? stream.timestamp * 1000 : Date.now()));
+      const diffHours = (Date.now() - streamDate.getTime()) / (1000 * 60 * 60);
+      // Relaxed from 12h to 24h to catch matches where the scraper timestamp might be slightly stale
+      if (diffHours > 24) return false;
+    } else {
+      const s = state?.toLowerCase() || "";
+      const isLive = s === "in" || s.includes("status_in") || s.includes("halftime") || s.includes("period");
+      const isUpcoming = s === "pre" || s.includes("status_scheduled");
+
+      if (isLive || isUpcoming) {
+        const activeMatch = currentMatch as ScoreboardEvent;
+        const startTime = new Date(activeMatch.date);
+        const diffHours = (Date.now() - startTime.getTime()) / (1000 * 60 * 60);
+        
+        const competitors = activeMatch.competitions?.[0]?.competitors || [];
+        const score1 = parseInt(competitors[0]?.score || "0");
+        const score2 = parseInt(competitors[1]?.score || "0");
+
+        // Relaxed from 6h/10h to 14H to prevent hiding delayed games or slow-scoring sports
+        // Only hide if it's way past start time AND still 0-0 AND NOT explicitly "in progress"
+        if (diffHours > 14 && score1 === 0 && score2 === 0 && !isLive) return false;
+      }
+    }
+    return true;
+  });
 
   return (
     <div style={{ 
@@ -303,7 +351,7 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                     {(() => {
                       if (!featuredStream) return null;
                       
-                      const teams = featuredStream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
+                      const teams = featuredStream.title.split(/\s+(?:vs\.?|at|@|v\.?|VS\.?|AT|V\.?)\s+/i);
                       const t1Name = teams[0]?.trim() || "";
                       const t2Name = teams[1]?.trim() || "";
                       
@@ -331,13 +379,13 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                           const s = activeMatch.status?.type?.state?.toLowerCase();
                           const isLiveOrDone = s === "in" || isTerminalState(s);
                           
-                          if (c1) { 
-                            t1Logo = c1.team?.logo; 
+                          if (c1 && c1.team) { 
+                            t1Logo = c1.team.logo; 
                             const sc = parseInt(c1.score);
                             t1Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
                           }
-                          if (c2) { 
-                            t2Logo = c2.team?.logo; 
+                          if (c2 && c2.team) { 
+                            t2Logo = c2.team.logo; 
                             const sc = parseInt(c2.score);
                             t2Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
                           }
@@ -403,30 +451,9 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedStreams.length > 0 ? (
-                      sortedStreams.filter(stream => {
-                        const currentMatch = findMatchForStream(stream, scoreboards);
-                        const state = currentMatch?.status?.type?.state;
-                        
-                        if (isTerminalState(state)) return false;
- 
-                        if (!currentMatch) {
-                          const streamDate = new Date(stream.createdAt || (stream.timestamp ? stream.timestamp * 1000 : Date.now()));
-                          const diffHours = (Date.now() - streamDate.getTime()) / (1000 * 60 * 60);
-                          if (diffHours > 12) return false;
-                        } else if (state === 'in' || state === 'pre') {
-                          const activeMatch = currentMatch as ScoreboardEvent;
-                          const startTime = new Date(activeMatch.date);
-                          const diffHours = (Date.now() - startTime.getTime()) / (1000 * 60 * 60);
-                          
-                          const competitors = activeMatch.competitions?.[0]?.competitors || [];
-                          const score1 = parseInt(competitors[0]?.score || "0");
-                          const score2 = parseInt(competitors[1]?.score || "0");
-                          if (diffHours > 6 && score1 === 0 && score2 === 0) return false;
-                        }
-                        return true;
-                      }).map((stream) => {
-                        const teams = stream.title.split(/\s+(?:vs|at|VS|AT)\s+/i);
+                    {liveStreams.length > 0 ? (
+                      liveStreams.map((stream) => {
+                        const teams = stream.title.split(/\s+(?:vs\.?|at|@|v\.?|VS\.?|AT|V\.?)\s+/i);
                         const t1N = normalize(teams[0]);
                         const t2N = normalize(teams[1]);
                         
@@ -451,7 +478,7 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                           });
                           
                           const s = activeMatch.status?.type?.state?.toLowerCase();
-                          const isLiveOrDone = s === "in" || isTerminalState(s);
+                          const isLiveOrDone = s === "in" || s?.includes("status_in") || isTerminalState(s);
                           
                           t1Logo = c1?.team?.logo;
                           t2Logo = c2?.team?.logo;
@@ -538,28 +565,34 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                   {completedMatches.length > 0 ? (
                     completedMatches.slice(0, 8).map(game => {
                       const activeGame = game as ScoreboardEvent;
-                      const c1 = activeGame.competitions[0].competitors[0];
-                      const c2 = activeGame.competitions[0].competitors[1];
+                      const c1 = activeGame.competitions?.[0]?.competitors?.[0];
+                      const c2 = activeGame.competitions?.[0]?.competitors?.[1];
+
+                      if (!c1?.team || !c2?.team) return null;
+
+                      const s1 = parseInt(c1.score || "0");
+                      const s2 = parseInt(c2.score || "0");
+
                       return (
                         <div key={activeGame.id} className="glass" style={{ padding: "15px", borderRadius: "16px", transition: "var(--transition)" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "var(--text-muted)", marginBottom: "10px" }}>
-                            <span>{activeGame.status.type.detail}</span>
-                            <span>{new Date(activeGame.date).toLocaleDateString([], { month: 'short', day: 'numeric' })}</span>
+                            <span>{activeGame.status?.type?.detail || "Completed"}</span>
+                            <span>{activeGame.date ? new Date(activeGame.date).toLocaleDateString([], { month: 'short', day: 'numeric' }) : ""}</span>
                           </div>
                           <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                 {c1.team.logo && <img src={c1.team.logo} alt="" style={{ width: "20px", height: "20px" }} />}
-                                <span style={{ fontSize: "0.9rem", fontWeight: parseInt(c1.score) > parseInt(c2.score) ? 700 : 400 }}>{c1.team.abbreviation || c1.team.name}</span>
+                                <span style={{ fontSize: "0.9rem", fontWeight: s1 > s2 ? 700 : 400 }}>{c1.team?.abbreviation || c1.team?.name || "Team"}</span>
                               </div>
-                              <span style={{ fontWeight: 800, color: parseInt(c1.score) > parseInt(c2.score) ? "var(--win-green)" : "inherit" }}>{c1.score}</span>
+                              <span style={{ fontWeight: 800, color: s1 > s2 ? "var(--win-green)" : "inherit" }}>{c1.score}</span>
                             </div>
                             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                                 {c2.team.logo && <img src={c2.team.logo} alt="" style={{ width: "20px", height: "20px" }} />}
-                                <span style={{ fontSize: "0.9rem", fontWeight: parseInt(c2.score) > parseInt(c1.score) ? 700 : 400 }}>{c2.team.abbreviation || c2.team.name}</span>
+                                <span style={{ fontSize: "0.9rem", fontWeight: s2 > s1 ? 700 : 400 }}>{c2.team?.abbreviation || c2.team?.name || "Team"}</span>
                               </div>
-                              <span style={{ fontWeight: 800, color: parseInt(c2.score) > parseInt(c1.score) ? "var(--win-green)" : "inherit" }}>{c2.score}</span>
+                              <span style={{ fontWeight: 800, color: s2 > s1 ? "var(--win-green)" : "inherit" }}>{c2.score}</span>
                             </div>
                           </div>
                         </div>

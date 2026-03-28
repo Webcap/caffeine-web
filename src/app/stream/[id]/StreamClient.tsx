@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+import Hls from "hls.js";
+
+interface Source {
+  url: string;
+  name: string;
+  referrer?: string;
+}
 
 interface Stream {
   id: string;
@@ -9,6 +16,8 @@ interface Stream {
   featured?: boolean;
   thumbnailUrl: string;
   videoUrl: string;
+  referrer?: string;
+  sources?: Source[];
 }
 
 interface Event {
@@ -43,9 +52,79 @@ interface StreamClientProps {
   showScores: boolean;
 }
 
+/** HLS Proxy Helpers */
+const b64Encode = (str: string) => {
+  try {
+    return btoa(unescape(encodeURIComponent(str)))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/, "");
+  } catch (e) {
+    return "";
+  }
+};
+
+const buildProxiedUrl = (baseUrl: string, targetUrl: string, referrer?: string) => {
+  if (!targetUrl) return "";
+  const headers = referrer ? { "Referer": referrer, "User-Agent": "Mozilla/5.0" } : { "User-Agent": "Mozilla/5.0" };
+  const encodedUrl = b64Encode(targetUrl);
+  const encodedHeaders = b64Encode(JSON.stringify(headers));
+  
+  // Hint extension for player compatibility
+  const extension = targetUrl.split("?")[0].endsWith(".m3u8") ? "/video.m3u8" : "";
+  return `${baseUrl}/proxy/stream${extension}?url=${encodedUrl}&headers=${encodedHeaders}`;
+};
+
 export default function StreamClient({ stream, allStreams, scoreboards, showScores }: StreamClientProps) {
   const [currentScoreboards, setCurrentScoreboards] = useState(scoreboards);
+  const [activeSource, setActiveSource] = useState<Source>({ 
+    url: stream.videoUrl, 
+    name: "Default Source", 
+    referrer: stream.referrer 
+  });
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const API_URL = process.env.NEXT_PUBLIC_CAFFEINE_API_URL || "https://caffeine-api.vercel.app";
+
+  // Initialize HLS player
+  useEffect(() => {
+    if (!videoRef.current) return;
+
+    const video = videoRef.current;
+    const url = buildProxiedUrl(API_URL, activeSource.url, activeSource.referrer);
+
+    if (!url) return;
+
+    // Clean up previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+    }
+
+    if (Hls.isSupported()) {
+      const hls = new Hls({
+        xhrSetup: (xhr, url) => {
+          // Note: Browsers generally forbid setting the Referer header via XHR.
+          // This is included as a best effort in case a proxy or specific environment allows it.
+          if (activeSource.referrer) {
+            // Some providers might accept it as a custom header if configured
+              xhr.setRequestHeader("X-Referer", activeSource.referrer);
+          }
+        }
+      });
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hlsRef.current = hls;
+    } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+      // Native HLS support (Safari)
+      video.src = url;
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+      }
+    };
+  }, [activeSource]);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -141,7 +220,7 @@ export default function StreamClient({ stream, allStreams, scoreboards, showScor
               </div>
             )}
 
-            {/* Video Player */}
+            {/* Video Player Container */}
             <div className="glass-panel" style={{ 
               aspectRatio: "16/9", 
               width: "100%", 
@@ -149,15 +228,51 @@ export default function StreamClient({ stream, allStreams, scoreboards, showScor
               borderRadius: "24px", 
               overflow: "hidden",
               boxShadow: "0 20px 50px rgba(0,0,0,0.5)",
-              border: "1px solid rgba(255,255,255,0.05)"
+              border: "1px solid rgba(255,255,255,0.05)",
+              position: "relative"
             }}>
-              <iframe 
-                src={stream.videoUrl} 
-                style={{ width: "100%", height: "100%", border: "none" }}
-                allowFullScreen
-                allow="autoplay; encrypted-media; gyroscope; picture-in-picture; clipboard-write"
-                referrerPolicy="no-referrer"
+              <video 
+                ref={videoRef}
+                controls
+                autoPlay
+                style={{ width: "100%", height: "100%", outline: "none" }}
+                poster={stream.thumbnailUrl}
               />
+              
+              {/* Source Selector Overlay */}
+              {stream.sources && stream.sources.length > 0 && (
+                <div style={{ 
+                  position: "absolute", 
+                  bottom: "60px", 
+                  right: "20px", 
+                  zIndex: 10,
+                  display: "flex",
+                  gap: "10px"
+                }}>
+                  <select 
+                    value={activeSource.url}
+                    onChange={(e) => {
+                      const selected = stream.sources?.find(s => s.url === e.target.value);
+                      if (selected) setActiveSource(selected);
+                    }}
+                    style={{
+                      background: "rgba(0,0,0,0.8)",
+                      color: "#fff",
+                      border: "1px solid rgba(255,255,255,0.2)",
+                      borderRadius: "8px",
+                      padding: "5px 10px",
+                      fontSize: "0.8rem",
+                      cursor: "pointer",
+                      outline: "none"
+                    }}
+                  >
+                    <option value={stream.videoUrl}>Default Source</option>
+                    {stream.sources.map((s, i) => (
+                      <option key={i} value={s.url}>{s.name || `Source ${i + 1}`}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Match Details Section */}
