@@ -12,9 +12,8 @@ export default function Home() {
   const [version, setVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [flags, setFlags] = useState<Record<string, boolean>>({
-    web_hero_marquee_enabled: true,
-    web_live_sports_enabled: true,
-    web_stream_scores_enabled: true
+    enable_ott: false,
+    web_live_sports: false
   });
 
   // Local posters from /public/assets/posters
@@ -35,24 +34,60 @@ export default function Home() {
     };
     window.addEventListener("scroll", handleScroll);
 
-    // Fetch APK URL from API
+    // Fetch APK URL from API and Feature Flags
     const fetchConfig = async () => {
       try {
         const apiUrl = process.env.NEXT_PUBLIC_CAFFEINE_API_URL || "https://caffeine-api.vercel.app";
-        const response = await fetch(`${apiUrl}/config`);
-        const data = await response.json();
+        
+        // Fetch config and flags in parallel
+        // Use a dynamic env check or default to production
+        const env = process.env.NODE_ENV === "development" ? "development" : "production";
+        
+        const [configRes, flagsRes] = await Promise.all([
+          fetch(`${apiUrl}/config`, { cache: "no-store" }),
+          fetch(`${apiUrl}/v1/feature-flags?platform=web&env=${env}`, { cache: "no-store" })
+        ]);
+
+        const data = await configRes.json();
+        const featureFlags = flagsRes.ok ? await flagsRes.json() : {};
+        console.log(`[Flags] Raw API Response (${env}):`, featureFlags);
+        console.log(`[Flags] Legacy Config:`, data);
+
         setVersion(data.latest_version || null);
         const url = data.update_download_url || data.update_store_url;
         if (url && url !== "") {
           setApkUrl(url);
         }
 
-        // Set Feature Flags
-        setFlags({
-          web_hero_marquee_enabled: data.web_hero_marquee_enabled ?? true,
-          web_live_sports_enabled: data.web_live_sports_enabled ?? true,
-          web_stream_scores_enabled: data.web_stream_scores_enabled ?? true
-        });
+        // Set Feature Flags with priority to the new system, then legacy config
+        const getFlag = (key: string, legacyValue: any, defaultValue: boolean, isMigrated: boolean = false) => {
+           // 1. New System Priority
+           if (featureFlags && featureFlags[key] !== undefined) {
+             const val = featureFlags[key] === true;
+             console.log(`[Flags] ${key} from new system: ${val}`);
+             return val;
+           }
+           
+           // 2. If it's a migrated flag, and we are using the new system (even if empty/no-config for this env), 
+           // we default it to false to avoid legacy leakage.
+           if (isMigrated) {
+             console.log(`[Flags] ${key} is migrated but missing from new system API, forcing false.`);
+             return false;
+           }
+
+           // 3. Fallback to legacy config for non-migrated or first-time setup
+           const val = legacyValue ?? defaultValue;
+           console.log(`[Flags] ${key} using legacy fallback: ${val}`);
+           return val;
+        };
+
+        const newFlags = {
+          enable_ott: getFlag("enable_ott", data.enable_ott, false, true), // isMigrated: true
+          web_live_sports: getFlag("web_live_sports", data.web_live_sports, false, true) // isMigrated: true
+        };
+
+        console.log("[Flags] Final evaluated flags:", newFlags);
+        setFlags(newFlags);
 
         // Initialize Mixpanel
         if (data.mixpanel_token) {
@@ -78,7 +113,7 @@ export default function Home() {
           CAFFEINE <span className="logo-badge">TV</span>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: "2rem", alignItems: "center" }}>
-          {flags.web_live_sports_enabled && (
+          {flags.enable_ott && (
              <a href="/live" style={{ fontSize: "0.9rem", opacity: 0.8, color: "var(--accent-blue)", fontWeight: 700 }}>Live</a>
           )}
           <a href="#features" style={{ fontSize: "0.9rem", opacity: 0.8 }}>Features</a>
@@ -98,8 +133,7 @@ export default function Home() {
         backgroundColor: "#060606"
       }}>
         {/* Poster Marquee Background */}
-        {flags.web_hero_marquee_enabled && (
-          <div style={{
+        <div style={{
             position: "absolute",
             top: 0,
             left: 0,
@@ -129,7 +163,6 @@ export default function Home() {
               ))}
             </div>
           </div>
-        )}
 
         {/* Gradient Mask Overlay */}
         <div style={{
@@ -288,7 +321,7 @@ export default function Home() {
             {[
               { title: "4K HDR Streaming", desc: "Crystal clear quality with ultra-low latency.", icon: "⚡", enabled: true },
               { title: "Universal Sync", desc: "Start on your TV, finish on your phone.", icon: "🔄", enabled: true },
-              { title: "Live Sports", desc: "Never miss a moment with real-time broadcasts.", icon: "⚽", enabled: flags.web_live_sports_enabled }
+              { title: "Live Sports", desc: "Never miss a moment with real-time broadcasts.", icon: "⚽", enabled: flags.web_live_sports }
             ].filter(f => f.enabled).map((feature, i) => (
               <div key={i} className="glass" style={{ padding: "40px", borderRadius: "16px", transition: "var(--transition)" }}>
                  <div style={{ fontSize: "2rem", marginBottom: "20px" }}>{feature.icon}</div>

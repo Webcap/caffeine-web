@@ -21,10 +21,13 @@ export default async function StreamPage({ params }: StreamPageProps) {
   let showLive = true;
 
   try {
-    const [streamsRes, scoreboardsRes, configRes] = await Promise.all([
+    const env = process.env.NODE_ENV === "development" ? "development" : "production";
+
+    const [streamsRes, scoreboardsRes, configRes, flagsRes] = await Promise.all([
       fetch(`${API_URL}/sports/streams`, { cache: 'no-store' }),
       fetch(`${API_URL}/sports/scoreboard/all`, { cache: 'no-store' }),
-      fetch(`${API_URL}/config`, { cache: 'no-store' })
+      fetch(`${API_URL}/config`, { cache: 'no-store' }),
+      fetch(`${API_URL}/v1/feature-flags?platform=web&env=${env}`, { cache: 'no-store' })
     ]);
 
     if (streamsRes.ok) {
@@ -36,10 +39,23 @@ export default async function StreamPage({ params }: StreamPageProps) {
       scoreboards = await scoreboardsRes.json();
     }
 
-    if (configRes.ok) {
-      const config = await configRes.json();
-      showScores = config.web_stream_scores_enabled ?? true;
-      showLive = config.web_live_sports_enabled ?? true;
+    let config: any = {};
+    if (configRes.ok) config = await configRes.json();
+
+    let featureFlags: any = {};
+    if (flagsRes.ok) featureFlags = await flagsRes.json();
+
+    // Priority: New system, then legacy config, then default true
+    if (featureFlags) {
+      // enable_ott replaces the old web_live_sports_enabled for consistent universal control
+      if (featureFlags.enable_ott !== undefined) {
+        showLive = featureFlags.enable_ott === true;
+      } else {
+        showLive = config.enable_ott ?? true;
+      }
+      
+      // Scores are now always enabled by default if OTT is on
+      showScores = true;
     }
   } catch (e) {
     console.error("Failed to fetch stream data or config on server:", e);
