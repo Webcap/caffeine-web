@@ -9,6 +9,7 @@ import VersionDisplay from "@/components/VersionDisplay";
 export default function Home() {
   const [scrolled, setScrolled] = useState(false);
   const [apkUrl, setApkUrl] = useState<string | null>(null);
+  const [tvApkUrl, setTvApkUrl] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [flags, setFlags] = useState<Record<string, boolean>>({
@@ -39,24 +40,49 @@ export default function Home() {
       try {
         const apiUrl = process.env.NEXT_PUBLIC_CAFFEINE_API_URL || "https://caffeine-api.vercel.app";
         
-        // Fetch config and flags in parallel
-        // Use a dynamic env check or default to production
+        // Fetch config, updates, and flags in parallel
         const env = process.env.NODE_ENV === "development" ? "development" : "production";
         
-        const [configRes, flagsRes] = await Promise.all([
+        const fetchUpdate = async (platform: string) => {
+          const res = await fetch(`${apiUrl}/v1/updates?platform=${platform}&environment=${env}`, { cache: "no-store" });
+          if (res.ok) return await res.json();
+          
+          // Environment fallback: If dev, try prod
+          if (env === "development") {
+             console.log(`[Updates] ${platform} not found in development, falling back to production...`);
+             const fallbackRes = await fetch(`${apiUrl}/v1/updates?platform=${platform}&environment=production`, { cache: "no-store" });
+             if (fallbackRes.ok) return await fallbackRes.json();
+          }
+          return null;
+        };
+
+        const [configRes, androidUpdate, tvUpdate, flagsRes] = await Promise.all([
           fetch(`${apiUrl}/config`, { cache: "no-store" }),
+          fetchUpdate("android"),
+          fetchUpdate("tv"),
           fetch(`${apiUrl}/v1/feature-flags?platform=web&env=${env}`, { cache: "no-store" })
         ]);
-
-        const data = await configRes.json();
+ 
+        const configData = await configRes.json();
         const featureFlags = flagsRes.ok ? await flagsRes.json() : {};
-        console.log(`[Flags] Raw API Response (${env}):`, featureFlags);
-        console.log(`[Flags] Legacy Config:`, data);
 
-        setVersion(data.latest_version || null);
-        const url = data.update_download_url || data.update_store_url;
-        if (url && url !== "") {
-          setApkUrl(url);
+        console.log(`[Flags] Raw API Response (${env}):`, featureFlags);
+        console.log(`[Updates] Android:`, androidUpdate);
+        console.log(`[Updates] TV:`, tvUpdate);
+
+        // Set version and download links strictly from new updates system
+        if (androidUpdate) {
+          setVersion(androidUpdate.latest_version);
+          setApkUrl(androidUpdate.download_url || androidUpdate.store_url || null);
+        } else {
+          setVersion(null);
+          setApkUrl(null);
+        }
+
+        if (tvUpdate) {
+          setTvApkUrl(tvUpdate.download_url || tvUpdate.store_url || null);
+        } else {
+          setTvApkUrl(null);
         }
 
         // Set Feature Flags with priority to the new system, then legacy config
@@ -75,23 +101,21 @@ export default function Home() {
              return false;
            }
 
-           // 3. Fallback to legacy config for non-migrated or first-time setup
-           const val = legacyValue ?? defaultValue;
-           console.log(`[Flags] ${key} using legacy fallback: ${val}`);
-           return val;
+           // 3. Fallback to default
+           return legacyValue ?? defaultValue;
         };
 
         const newFlags = {
-          enable_ott: getFlag("enable_ott", data.enable_ott, false, true), // isMigrated: true
-          web_live_sports: getFlag("web_live_sports", data.web_live_sports, false, true) // isMigrated: true
+          enable_ott: getFlag("enable_ott", configData.enable_ott, false, true), // isMigrated: true
+          web_live_sports: getFlag("web_live_sports", configData.web_live_sports, false, true) // isMigrated: true
         };
 
         console.log("[Flags] Final evaluated flags:", newFlags);
         setFlags(newFlags);
 
         // Initialize Mixpanel
-        if (data.mixpanel_token) {
-          mixpanelInit(data.mixpanel_token);
+        if (configData.mixpanel_token) {
+          mixpanelInit(configData.mixpanel_token);
           trackEvent("Web App Started");
         }
       } catch (e) {
@@ -294,8 +318,15 @@ export default function Home() {
                <p style={{ color: "var(--text-muted)", marginBottom: "30px", minHeight: "3rem" }}>
                   Bringing the big screen home. Native TV interface with remote control optimization.
                </p>
-               <button className="btn-secondary" style={{ width: "100%" }} onClick={() => alert("Deployment in progress. Check Back Soon.")}>
-                 Coming SOON
+               <button 
+                 className={`btn-secondary ${!tvApkUrl && "disabled"}`} 
+                 style={{ width: "100%", opacity: tvApkUrl ? 1 : 0.5, cursor: tvApkUrl ? "pointer" : "not-allowed" }} 
+                 onClick={() => {
+                   if (tvApkUrl) window.open(tvApkUrl, "_blank");
+                   else alert("Deployment in progress. Check Back Soon.");
+                 }}
+               >
+                 {loading ? "Discovering..." : (tvApkUrl ? "Download TV APK" : "Coming SOON")}
                </button>
                <div style={{ marginTop: "24px", paddingTop: "24px", borderTop: "1px solid var(--glass-border)", fontSize: "0.8rem", color: "#666", display: "flex", justifyContent: "center", gap: "1rem" }}>
                   <span>Sideload ready</span>
