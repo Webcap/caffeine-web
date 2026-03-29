@@ -15,7 +15,13 @@ interface Stream {
 
 interface Competitor {
   id: string;
-  team: {
+  athlete?: {
+    id: string;
+    displayName: string;
+    headshot?: string | { href: string };
+    shortName?: string;
+  };
+  team?: {
     name: string;
     abbreviation: string;
     logo: string;
@@ -38,6 +44,13 @@ interface ScoreboardEvent {
   };
   competitions: Array<{
     competitors: Competitor[];
+    status?: {
+      type: {
+        state: string;
+        detail: string;
+      };
+    };
+    name?: string;
   }>;
 }
 
@@ -101,13 +114,17 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
     const date = new Date(dateStr);
     if (isNaN(date.getTime())) return "--:--";
 
-    // ESPN often uses 04:00Z (12:00 AM ET) as a placeholder for games on the current day
+    // ESPN often uses 04:00Z (12:00 AM ET) or similar as a placeholder for games
     // if the exact time isn't confirmed yet in the 'date' field.
-    // However, the 'detail' string often contains the correctly localized time.
-    if (detail && date.getUTCHours() === 4 && date.getUTCMinutes() === 0) {
+    // If we have a detail string with a clear time (e.g. "1:00 PM"), we prioritize that.
+    if (detail) {
       const timeMatch = detail.match(/(\d{1,2}:\d{2}\s?(?:AM|PM))/i);
-      if (timeMatch) return timeMatch[1].toUpperCase();
+      // Only override if the original date looks like a day-placeholder (top of hour, 0 minutes)
+      if (timeMatch && date.getUTCMinutes() === 0) {
+        return timeMatch[1].toUpperCase();
+      }
     }
+
 
     return date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
   };
@@ -126,12 +143,14 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
       if (!sb || !sb.events) return;
       
       sb.events.forEach(ev => {
-        const comps = ev?.competitions?.[0]?.competitors || [];
-        const hasMatch = (norm: string) => comps.some((c) => {
-          const cn = normalize(c.team?.name);
-          const cfn = normalize(c.team?.displayName);
-          const csn = normalize(c.team?.shortDisplayName || "");
-          return cn.includes(norm) || norm.includes(cn) || cfn.includes(norm) || norm.includes(cfn) || (csn && (csn.includes(norm) || norm.includes(csn)));
+        const allComps = ev?.competitions || [];
+        const hasMatch = (norm: string) => allComps.some((comp: any) => {
+          return (comp.competitors || []).some((c: Competitor) => {
+            const cn = normalize(c.team?.name || "");
+            const cfn = normalize(c.team?.displayName || c.athlete?.displayName || "");
+            const csn = normalize(c.team?.shortDisplayName || c.athlete?.shortName || "");
+            return cn.includes(norm) || norm.includes(cn) || cfn.includes(norm) || norm.includes(cfn) || (csn && (csn.includes(norm) || norm.includes(csn)));
+          });
         });
 
         if (hasMatch(t1Norm) && hasMatch(t2Norm)) {
@@ -371,70 +390,180 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                     {(() => {
                       if (!featuredStream) return null;
                       
-                      const teams = featuredStream.title.split(/\s+(?:vs\.?|at|@|v\.?|VS\.?|AT|V\.?)\s+/i);
-                      const t1Name = teams[0]?.trim() || "";
-                      const t2Name = teams[1]?.trim() || "";
-                      
                       const featuredMatch = findMatchForStream(featuredStream, scoreboards);
+                      const isMma = featuredStream.sport?.toUpperCase() === "UFC" || featuredStream.sport?.toUpperCase() === "MMA";
+                      
+                      let t1Name = "";
+                      let t2Name = "";
                       let t1Logo = null, t2Logo = null;
                       let t1Score: string | null = null, t2Score: string | null = null;
 
-                      if (featuredMatch) {
+                      if (isMma && featuredMatch) {
                           const activeMatch = featuredMatch as ScoreboardEvent;
-                          const t1N = normalize(t1Name);
-                          const t2N = normalize(t2Name);
-                          const competitors = activeMatch.competitions?.[0]?.competitors || [];
+                          const allComps = activeMatch.competitions || [];
+                          // MMA: Main event is the LAST competition on the card
+                          const mainEventComp = allComps[allComps.length - 1];
+                          const competitors = mainEventComp?.competitors || [];
                           
-                          const c1 = competitors.find((c: Competitor) => {
-                             const cn = normalize(c.team?.name);
-                             const cfn = normalize(c.team?.displayName);
-                             return cn.includes(t1N) || t1N.includes(cn) || cfn.includes(t1N) || t1N.includes(cfn);
-                          });
-                          const c2 = competitors.find((c: Competitor) => {
-                             const cn = normalize(c.team?.name);
-                             const cfn = normalize(c.team?.displayName);
-                             return cn.includes(t2N) || t2N.includes(cn) || cfn.includes(t2N) || t2N.includes(cfn);
-                          });
+                          // MMA: Prioritize Athlete names over Team objects
+                          const ath1 = competitors[0]?.athlete;
+                          const ath2 = competitors[1]?.athlete;
+                          const team1 = competitors[0]?.team;
+                          const team2 = competitors[1]?.team;
+
+                          t1Name = ath1?.displayName || team1?.displayName || team1?.name || "TBD";
+                          t2Name = ath2?.displayName || team2?.displayName || team2?.name || "TBD";
                           
-                          const s = activeMatch.status?.type?.state?.toLowerCase();
+                          const resolveImg = (ath: any, comp: any) => {
+                            if (!ath && !comp) return null;
+                            // 1. Check for standard headshot
+                            if (ath?.headshot) return typeof ath.headshot === 'string' ? ath.headshot : ath.headshot.href;
+                            // 2. Check for photo/portrait fields
+                            if (ath?.photo) return ath.photo;
+                            if (ath?.portrait) return ath.portrait;
+                            // 3. Fallback to common href in links
+                            if (ath?.links?.find((l: any) => l.rel?.includes('player') || l.rel?.includes('athlete'))?.href) {
+                               return ath.links.find((l: any) => l.rel?.includes('player') || l.rel?.includes('athlete')).href;
+                            }
+                            // 4. Fallback: Construct ESPN MMA headshot URL based on competitor ID if available
+                            if (isMma && comp?.id) {
+                               return `https://a.espncdn.com/i/headshots/mma/players/full/${comp.id}.png`;
+                            }
+                            // 5. Fallback to generic logos
+                            return comp?.team?.logo || comp?.logo || comp?.image || null;
+                          };
+
+                          t1Logo = resolveImg(ath1, competitors[0]);
+                          t2Logo = resolveImg(ath2, competitors[1]);
+                          
+                          const s = mainEventComp?.status?.type?.state?.toLowerCase() || activeMatch.status?.type?.state?.toLowerCase();
                           const isLiveOrDone = s === "in" || isTerminalState(s);
                           
-                          if (c1 && c1.team) { 
-                            t1Logo = c1.team.logo; 
-                            const sc = parseInt(c1.score);
-                            t1Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
+                          if (isLiveOrDone) {
+                            t1Score = competitors[0]?.score || "0";
+                            t2Score = competitors[1]?.score || "0";
+                          } else {
+                            t1Score = "0";
+                            t2Score = "0";
                           }
-                          if (c2 && c2.team) { 
-                            t2Logo = c2.team.logo; 
-                            const sc = parseInt(c2.score);
-                            t2Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
+                      } else {
+                          // Standard Team Sport: Split title
+                          const teams = featuredStream.title.split(/\s+(?:vs\.?|at|@|v\.?|VS\.?|AT|V\.?)\s+/i);
+                          t1Name = teams[0]?.trim() || "";
+                          t2Name = teams[1]?.trim() || "";
+
+                          if (featuredMatch) {
+                            const activeMatch = featuredMatch as ScoreboardEvent;
+                            const t1N = normalize(t1Name);
+                            const t2N = normalize(t2Name);
+                            const competitors = activeMatch.competitions?.[0]?.competitors || [];
+                            
+                            const c1 = competitors.find((c: Competitor) => {
+                               const cn = normalize(c.team?.name);
+                               const cfn = normalize(c.team?.displayName);
+                               return cn.includes(t1N) || t1N.includes(cn) || cfn.includes(t1N) || t1N.includes(cfn);
+                            });
+                            const c2 = competitors.find((c: Competitor) => {
+                               const cn = normalize(c.team?.name);
+                               const cfn = normalize(c.team?.displayName);
+                               return cn.includes(t2N) || t2N.includes(cn) || cfn.includes(t2N) || t2N.includes(cfn);
+                            });
+                            
+                            const s = activeMatch.status?.type?.state?.toLowerCase();
+                            const isLiveOrDone = s === "in" || isTerminalState(s);
+                            
+                            if (c1 && c1.team) { 
+                              t1Logo = c1.team.logo; 
+                              const sc = parseInt(c1.score);
+                              t1Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
+                            }
+                            if (c2 && c2.team) { 
+                              t2Logo = c2.team.logo; 
+                              const sc = parseInt(c2.score);
+                              t2Score = isLiveOrDone ? (isNaN(sc) ? "0" : Math.max(0, sc).toString()) : "0"; 
+                            }
                           }
-                        }
-                      
+                      }
 
                       return (
                         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "60px", marginBottom: "30px" }}>
                           <div style={{ textAlign: "center", flex: 1 }}>
-                            <div style={{ fontSize: "1rem", color: "var(--accent-blue)", fontWeight: 700, textTransform: "uppercase", marginBottom: "10px" }}>{featuredStream.sport}</div>
-                            {t1Logo && <img src={t1Logo} alt="" style={{ width: "80px", height: "80px", marginBottom: "15px", filter: "drop-shadow(0 0 10px rgba(255,255,255,0.2))" }} />}
+                            <div style={{ 
+                              fontSize: "1rem", 
+                              color: "var(--accent-blue)", 
+                              fontWeight: 700, 
+                              textTransform: "uppercase", 
+                              marginBottom: "10px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "8px"
+                            }}>
+                              {featuredStream.sport?.toUpperCase() === "UFC" && (
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/d/d7/UFC_Logo.png" alt="UFC" style={{ height: "14px", opacity: 0.8 }} />
+                              )}
+                              <span>{!isMma ? featuredStream.sport : (featuredMatch?.name?.split(':')?.[0]?.trim() || featuredStream.sport)}</span>
+                            </div>
+                            <div style={{ position: "relative", marginBottom: "15px" }}>
+                              {t1Logo && (
+                                <>
+                                  <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "120%", height: "120%", background: "radial-gradient(circle, rgba(0, 150, 255, 0.15) 0%, transparent 70%)", borderRadius: "50%" }} />
+                                  <img 
+                                    src={t1Logo} 
+                                    alt="" 
+                                    style={{ 
+                                      width: isMma ? "120px" : "80px", 
+                                      height: isMma ? "120px" : "80px", 
+                                      borderRadius: isMma ? "50%" : "0",
+                                      objectFit: "cover",
+                                      filter: "drop-shadow(0 0 15px rgba(255,255,255,0.3))",
+                                      position: "relative",
+                                      zIndex: 1
+                                    }} 
+                                  />
+                                </>
+                              )}
+                              {!t1Logo && isMma && <div style={{ fontSize: "4rem" }}>🥋</div>}
+                            </div>
                             <h3 style={{ fontSize: "1.8rem", fontWeight: 800 }}>{t1Name}</h3>
-                            {t1Score !== null && <div style={{ fontSize: "2.5rem", fontWeight: 900, marginTop: "10px" }}>{t1Score}</div>}
+                            {t1Score !== null && !isMma && <div style={{ fontSize: "2.5rem", fontWeight: 900, marginTop: "10px" }}>{t1Score}</div>}
                           </div>
                           
                           <div style={{ textAlign: "center", minWidth: "150px" }}>
                             <div style={{ fontSize: "1.5rem", fontWeight: 900, color: "var(--text-muted)", marginBottom: "5px" }}>VS</div>
                             {featuredMatch && (
                               <div className="glass" style={{ padding: "4px 12px", borderRadius: "20px", fontSize: "0.8rem", fontWeight: 700, border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.05)" }}>
-                                {(featuredMatch as ScoreboardEvent).status.type.state === "pre" ? `Starts ${formatTime((featuredMatch as ScoreboardEvent).date)}` : (featuredMatch as ScoreboardEvent).status.type.detail}
+                                {isTerminalState((featuredMatch as ScoreboardEvent).status.type.state) ? "Final" : 
+                                 (featuredMatch as ScoreboardEvent).status.type.state === "pre" ? `Starts ${formatTime((featuredMatch as ScoreboardEvent).date)}` : (featuredMatch as ScoreboardEvent).status.type.detail}
                               </div>
                             )}
                           </div>
 
                           <div style={{ textAlign: "center", flex: 1 }}>
                             <div style={{ fontSize: "1rem", color: "transparent", userSelect: "none", marginBottom: "10px" }}>.</div>
-                            {t2Logo && <img src={t2Logo} alt="" style={{ width: "80px", height: "80px", marginBottom: "15px", filter: "drop-shadow(0 0 10px rgba(255,255,255,0.2))" }} />}
+                            <div style={{ position: "relative", marginBottom: "15px" }}>
+                              {t2Logo && (
+                                <>
+                                  <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "120%", height: "120%", background: "radial-gradient(circle, rgba(231, 76, 60, 0.15) 0%, transparent 70%)", borderRadius: "50%" }} />
+                                  <img 
+                                    src={t2Logo} 
+                                    alt="" 
+                                    style={{ 
+                                      width: isMma ? "120px" : "80px", 
+                                      height: isMma ? "120px" : "80px", 
+                                      borderRadius: isMma ? "50%" : "0",
+                                      objectFit: "cover",
+                                      filter: "drop-shadow(0 0 15px rgba(255,255,255,0.3))",
+                                      position: "relative",
+                                      zIndex: 1
+                                    }} 
+                                  />
+                                </>
+                              )}
+                              {!t2Logo && isMma && <div style={{ fontSize: "4rem" }}>🥋</div>}
+                            </div>
                             <h3 style={{ fontSize: "1.8rem", fontWeight: 800 }}>{t2Name}</h3>
-                            {t2Score !== null && <div style={{ fontSize: "2.5rem", fontWeight: 900, marginTop: "10px" }}>{t2Score}</div>}
+                            {t2Score !== null && !isMma && <div style={{ fontSize: "2.5rem", fontWeight: 900, marginTop: "10px" }}>{t2Score}</div>}
                           </div>
                         </div>
                       );
@@ -513,15 +642,19 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                         const statusDetail = currentMatch?.status?.type?.detail || "LiveNow";
                         let startTime = currentMatch ? formatTime(currentMatch.date, statusDetail) : formatTime(stream.timestamp ? new Date(stream.timestamp * 1000).toISOString() : undefined);
                         
-                        // Prevent confusing "12:00 AM" discovery placeholders when matching fails
-                        if (!currentMatch && startTime === "12:00 AM") {
+                        // Prevent confusing "12:00 AM" discovery placeholders when matching fails.
+                        // We use a regex to handle different space characters (like narrow non-breaking space)
+                        // and case variations that toLocaleTimeString might produce.
+                        if (!currentMatch && /^12:00\s?(AM|PM)$/i.test(startTime.replace(/\s/g, " "))) {
                           startTime = "Upcoming";
                         }
+
 
                         
                         const matchState = currentMatch?.status?.type?.state?.toLowerCase() || "";
                         const isLive = matchState === "in" || matchState.includes("status_in") || matchState.includes("halftime") || matchState.includes("period");
                         const isUpcoming = matchState === "pre" || matchState.includes("status_scheduled");
+                        const isMmaRow = stream.sport?.toUpperCase() === "UFC" || stream.sport?.toUpperCase() === "MMA";
 
                         return (
 
@@ -539,21 +672,24 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "120px" }}>
                                   {t1Logo && <img src={t1Logo} alt="" style={{ width: "24px", height: "24px" }} />}
-                                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{teams[0]?.trim()}</span>
+                                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{teams[0]?.trim() || ""}</span>
                                 </div>
                                 <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>vs</span>
                                 <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: "120px" }}>
                                   {t2Logo && <img src={t2Logo} alt="" style={{ width: "24px", height: "24px" }} />}
-                                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{teams[1]?.trim()}</span>
+                                  <span style={{ fontWeight: 600, fontSize: "0.9rem" }}>{teams[1]?.trim() || ""}</span>
                                 </div>
                               </div>
                             </td>
                             <td style={{ padding: "20px 12px" }}>
-                              <div style={{ fontWeight: 800, fontSize: "1.1rem", fontFamily: "monospace" }}>
-                                <span style={{ color: parseInt(t1Score) > parseInt(t2Score) ? "var(--win-green)" : "inherit" }}>{t1Score}</span>
-                                <span style={{ color: "var(--text-muted)", margin: "0 4px" }}>-</span>
-                                <span style={{ color: parseInt(t2Score) > parseInt(t1Score) ? "var(--win-green)" : "inherit" }}>{t2Score}</span>
-                              </div>
+                              {!isMmaRow && (
+                                <div style={{ fontWeight: 800, fontSize: "1.1rem", fontFamily: "monospace" }}>
+                                  <span style={{ color: parseInt(t1Score) > parseInt(t2Score) ? "var(--win-green)" : "inherit" }}>{t1Score}</span>
+                                  <span style={{ color: "var(--text-muted)", margin: "0 4px" }}>-</span>
+                                  <span style={{ color: parseInt(t2Score) > parseInt(t1Score) ? "var(--win-green)" : "inherit" }}>{t2Score}</span>
+                                </div>
+                              )}
+                              {isMmaRow && <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>---</span>}
                             </td>
                             <td style={{ padding: "20px 12px" }}>
                               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>

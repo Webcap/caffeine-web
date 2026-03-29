@@ -9,13 +9,14 @@ import VersionDisplay from "@/components/VersionDisplay";
 export default function Home() {
   const [scrolled, setScrolled] = useState(false);
   const [apkUrl, setApkUrl] = useState<string | null>(null);
+  const [tvApkUrl, setTvApkUrl] = useState<string | null>(null);
   const [version, setVersion] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [flags, setFlags] = useState<Record<string, boolean>>({
-    web_hero_marquee_enabled: true,
-    web_live_sports_enabled: true,
-    web_stream_scores_enabled: true
+    enable_ott: false,
+    web_live_sports: false
   });
+  const [featuredUfc, setFeaturedUfc] = useState<any>(null);
 
   // Local posters from /public/assets/posters
   const localPosters = [
@@ -35,28 +36,118 @@ export default function Home() {
     };
     window.addEventListener("scroll", handleScroll);
 
-    // Fetch APK URL from API
+    // Fetch APK URL from API and Feature Flags
     const fetchConfig = async () => {
       try {
         const apiUrl = process.env.NEXT_PUBLIC_CAFFEINE_API_URL || "https://caffeine-api.vercel.app";
-        const response = await fetch(`${apiUrl}/config`);
-        const data = await response.json();
-        setVersion(data.latest_version || null);
-        const url = data.update_download_url || data.update_store_url;
-        if (url && url !== "") {
-          setApkUrl(url);
+        
+        // Fetch config, updates, and flags in parallel
+        const env = process.env.NODE_ENV === "development" ? "development" : "production";
+        
+        const fetchUpdate = async (platform: string) => {
+          const res = await fetch(`${apiUrl}/v1/updates?platform=${platform}&environment=${env}`, { cache: "no-store" });
+          if (res.ok) return await res.json();
+          
+          // Environment fallback: If dev, try prod
+          if (env === "development") {
+             console.log(`[Updates] ${platform} not found in development, falling back to production...`);
+             const fallbackRes = await fetch(`${apiUrl}/v1/updates?platform=${platform}&environment=production`, { cache: "no-store" });
+             if (fallbackRes.ok) return await fallbackRes.json();
+          }
+          return null;
+        };
+
+        const [configRes, androidUpdate, tvUpdate, flagsRes, ufcRes] = await Promise.all([
+          fetch(`${apiUrl}/config`, { cache: "no-store" }),
+          fetchUpdate("android"),
+          fetchUpdate("tv"),
+          fetch(`${apiUrl}/v1/feature-flags?platform=web&env=${env}`, { cache: "no-store" }),
+          fetch(`${apiUrl}/v1/summary?sport=mma&league=ufc`, { cache: "no-store" })
+        ]);
+ 
+        const configData = await configRes.json();
+        const featureFlags = flagsRes.ok ? await flagsRes.json() : {};
+        const ufcData = ufcRes.ok ? await ufcRes.json() : null;
+
+        console.log(`[Flags] Raw API Response (${env}):`, featureFlags);
+        console.log(`[Updates] Android:`, androidUpdate);
+        console.log(`[Updates] TV:`, tvUpdate);
+
+        // Parse UFC Data for Featured Banner
+        if (ufcData && ufcData.events && ufcData.events.length > 0) {
+            const event = ufcData.events[0];
+            const comps = event.competitions || [];
+            if (comps.length > 0) {
+                // Find active or main (last)
+                const active = comps.find((c: any) => c.status?.type?.state === 'in');
+                const next = comps.find((c: any) => c.status?.type?.state === 'pre');
+                const main = comps[comps.length - 1];
+                const target = active || next || main;
+                
+                if (target) {
+                   const competitors = target.competitors || [];
+                   const athlete1 = competitors[0]?.athlete;
+                   const athlete2 = competitors[1]?.athlete;
+                   
+                   setFeaturedUfc({
+                      id: event.id,
+                      name: event.shortName || event.name,
+                      status: target.status?.type?.shortDetail || target.status?.type?.description,
+                      isLive: target.status?.type?.state === 'in',
+                      fighter1: athlete1?.shortName || athlete1?.displayName || "TBD",
+                      fighter2: athlete2?.shortName || athlete2?.displayName || "TBD",
+                      logo: "https://upload.wikimedia.org/wikipedia/commons/d/d7/UFC_Logo.png"
+                   });
+                }
+            }
         }
 
-        // Set Feature Flags
-        setFlags({
-          web_hero_marquee_enabled: data.web_hero_marquee_enabled ?? true,
-          web_live_sports_enabled: data.web_live_sports_enabled ?? true,
-          web_stream_scores_enabled: data.web_stream_scores_enabled ?? true
-        });
+        // Set version and download links strictly from new updates system
+        if (androidUpdate) {
+          setVersion(androidUpdate.latest_version);
+          setApkUrl(androidUpdate.download_url || androidUpdate.store_url || null);
+        } else {
+          setVersion(null);
+          setApkUrl(null);
+        }
+
+        if (tvUpdate) {
+          setTvApkUrl(tvUpdate.download_url || tvUpdate.store_url || null);
+        } else {
+          setTvApkUrl(null);
+        }
+
+        // Set Feature Flags with priority to the new system, then legacy config
+        const getFlag = (key: string, legacyValue: any, defaultValue: boolean, isMigrated: boolean = false) => {
+           // 1. New System Priority
+           if (featureFlags && featureFlags[key] !== undefined) {
+             const val = featureFlags[key] === true;
+             console.log(`[Flags] ${key} from new system: ${val}`);
+             return val;
+           }
+           
+           // 2. If it's a migrated flag, and we are using the new system (even if empty/no-config for this env), 
+           // we default it to false to avoid legacy leakage.
+           if (isMigrated) {
+             console.log(`[Flags] ${key} is migrated but missing from new system API, forcing false.`);
+             return false;
+           }
+
+           // 3. Fallback to default
+           return legacyValue ?? defaultValue;
+        };
+
+        const newFlags = {
+          enable_ott: getFlag("enable_ott", configData.enable_ott, false, true), // isMigrated: true
+          web_live_sports: getFlag("web_live_sports", configData.web_live_sports, false, true) // isMigrated: true
+        };
+
+        console.log("[Flags] Final evaluated flags:", newFlags);
+        setFlags(newFlags);
 
         // Initialize Mixpanel
-        if (data.mixpanel_token) {
-          mixpanelInit(data.mixpanel_token);
+        if (configData.mixpanel_token) {
+          mixpanelInit(configData.mixpanel_token);
           trackEvent("Web App Started");
         }
       } catch (e) {
@@ -78,7 +169,7 @@ export default function Home() {
           CAFFEINE <span className="logo-badge">TV</span>
         </div>
         <div style={{ marginLeft: "auto", display: "flex", gap: "2rem", alignItems: "center" }}>
-          {flags.web_live_sports_enabled && (
+          {flags.enable_ott && (
              <a href="/live" style={{ fontSize: "0.9rem", opacity: 0.8, color: "var(--accent-blue)", fontWeight: 700 }}>Live</a>
           )}
           <a href="#features" style={{ fontSize: "0.9rem", opacity: 0.8 }}>Features</a>
@@ -98,8 +189,7 @@ export default function Home() {
         backgroundColor: "#060606"
       }}>
         {/* Poster Marquee Background */}
-        {flags.web_hero_marquee_enabled && (
-          <div style={{
+        <div style={{
             position: "absolute",
             top: 0,
             left: 0,
@@ -129,7 +219,6 @@ export default function Home() {
               ))}
             </div>
           </div>
-        )}
 
         {/* Gradient Mask Overlay */}
         <div style={{
@@ -145,6 +234,59 @@ export default function Home() {
           `,
           pointerEvents: "none"
         }} />
+
+        {/* Featured UFC Banner */}
+        {flags.web_live_sports && featuredUfc && (
+          <div className="animate-fade-in" style={{ 
+            position: "relative", 
+            zIndex: 10, 
+            marginBottom: "3rem",
+            background: "rgba(255, 255, 255, 0.03)",
+            backdropFilter: "blur(20px)",
+            border: "1px solid rgba(255, 255, 255, 0.05)",
+            padding: "16px 24px",
+            borderRadius: "100px",
+            display: "flex",
+            alignItems: "center",
+            gap: "20px",
+            boxShadow: "0 20px 40px rgba(0,0,0,0.3)"
+          }}>
+            <img src={featuredUfc.logo} alt="UFC" style={{ height: "18px", opacity: 0.8 }} />
+            <div style={{ width: "1px", height: "14px", background: "rgba(255,255,255,0.1)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <span style={{ fontSize: "0.8rem", fontWeight: 700, letterSpacing: "0.1em", color: "rgba(255,255,255,0.4)" }}>FEATURED EVENT</span>
+              <span style={{ fontSize: "0.9rem", fontWeight: 600 }}>{featuredUfc.name}</span>
+            </div>
+            <div style={{ width: "1px", height: "14px", background: "rgba(255,255,255,0.1)" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <div style={{ textAlign: "right" }}>
+                <span style={{ display: "block", fontSize: "0.9rem", fontWeight: 700, color: "var(--accent-blue)" }}>{featuredUfc.fighter1} vs {featuredUfc.fighter2}</span>
+              </div>
+              <div style={{ 
+                padding: "4px 10px", 
+                background: featuredUfc.isLive ? "rgba(239, 68, 68, 0.15)" : "rgba(255,255,255,0.05)", 
+                borderRadius: "6px",
+                border: featuredUfc.isLive ? "1px solid rgba(239, 68, 68, 0.2)" : "1px solid rgba(255,255,255,0.1)",
+                display: "flex",
+                alignItems: "center",
+                gap: "6px"
+              }}>
+                {featuredUfc.isLive && (
+                   <div style={{ width: "6px", height: "6px", background: "#ef4444", borderRadius: "50%" }} className="glow-pulse" />
+                )}
+                <span style={{ fontSize: "0.75rem", fontWeight: 800, color: featuredUfc.isLive ? "#ef4444" : "#888", textTransform: "uppercase" }}>
+                  {featuredUfc.status}
+                </span>
+              </div>
+            </div>
+            {flags.enable_ott && (
+               <>
+                <div style={{ width: "1px", height: "14px", background: "rgba(255,255,255,0.1)" }} />
+                <a href="/live" className="btn-primary" style={{ padding: "8px 16px", fontSize: "0.75rem", borderRadius: "80px" }}>Watch Now</a>
+               </>
+            )}
+          </div>
+        )}
 
         <div className="animate-fade-in" style={{ position: "relative", zIndex: 2 }}>
           <h1 style={{ fontSize: "clamp(3rem, 8vw, 5rem)", marginBottom: "1.5rem" }}>
@@ -261,8 +403,15 @@ export default function Home() {
                <p style={{ color: "var(--text-muted)", marginBottom: "30px", minHeight: "3rem" }}>
                   Bringing the big screen home. Native TV interface with remote control optimization.
                </p>
-               <button className="btn-secondary" style={{ width: "100%" }} onClick={() => alert("Deployment in progress. Check Back Soon.")}>
-                 Coming SOON
+               <button 
+                 className={`btn-secondary ${!tvApkUrl && "disabled"}`} 
+                 style={{ width: "100%", opacity: tvApkUrl ? 1 : 0.5, cursor: tvApkUrl ? "pointer" : "not-allowed" }} 
+                 onClick={() => {
+                   if (tvApkUrl) window.open(tvApkUrl, "_blank");
+                   else alert("Deployment in progress. Check Back Soon.");
+                 }}
+               >
+                 {loading ? "Discovering..." : (tvApkUrl ? "Download TV APK" : "Coming SOON")}
                </button>
                <div style={{ marginTop: "24px", paddingTop: "24px", borderTop: "1px solid var(--glass-border)", fontSize: "0.8rem", color: "#666", display: "flex", justifyContent: "center", gap: "1rem" }}>
                   <span>Sideload ready</span>
@@ -288,7 +437,7 @@ export default function Home() {
             {[
               { title: "4K HDR Streaming", desc: "Crystal clear quality with ultra-low latency.", icon: "⚡", enabled: true },
               { title: "Universal Sync", desc: "Start on your TV, finish on your phone.", icon: "🔄", enabled: true },
-              { title: "Live Sports", desc: "Never miss a moment with real-time broadcasts.", icon: "⚽", enabled: flags.web_live_sports_enabled }
+              { title: "Live Sports", desc: "Never miss a moment with real-time broadcasts.", icon: "⚽", enabled: flags.web_live_sports }
             ].filter(f => f.enabled).map((feature, i) => (
               <div key={i} className="glass" style={{ padding: "40px", borderRadius: "16px", transition: "var(--transition)" }}>
                  <div style={{ fontSize: "2rem", marginBottom: "20px" }}>{feature.icon}</div>
