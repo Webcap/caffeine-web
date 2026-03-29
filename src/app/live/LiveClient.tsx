@@ -73,10 +73,10 @@ const normalize = (s: string | undefined | null) => {
 
 const isTerminalState = (state: string | undefined) => {
   const s = state?.toLowerCase() || "";
-  return s === "post" || s === "final" || s === "complete" || s === "closed" || s === "canceled" ||
+  return s === "post" || s === "final" || s === "complete" || s === "closed" || s === "canceled" || s === "summary" ||
          s.includes("status_final") || s.includes("status_post") || 
          s.includes("status_closed") || s.includes("status_complete") ||
-         s.includes("status_canceled");
+         s.includes("status_canceled") || s.includes("status_summary");
 };
 
 export default function LiveClient({ initialStreams, initialScoreboards }: LiveClientProps) {
@@ -236,8 +236,8 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
     if (!currentMatch) {
       const streamDate = new Date(stream.createdAt || (stream.timestamp ? stream.timestamp * 1000 : Date.now()));
       const diffHours = (Date.now() - streamDate.getTime()) / (1000 * 60 * 60);
-      // Relaxed from 12h to 24h to catch matches where the scraper timestamp might be slightly stale
-      if (diffHours > 24) return false;
+      // Aggressive 6h fallback for unknown streams (was 24h)
+      if (diffHours > 6) return false;
     } else {
       const s = state?.toLowerCase() || "";
       const isLive = s === "in" || s.includes("status_in") || s.includes("halftime") || s.includes("period");
@@ -252,9 +252,8 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
         const score1 = parseInt(competitors[0]?.score || "0");
         const score2 = parseInt(competitors[1]?.score || "0");
 
-        // Relaxed from 6h/10h to 14H to prevent hiding delayed games or slow-scoring sports
         // Only hide if it's way past start time AND still 0-0 AND NOT explicitly "in progress"
-        if (diffHours > 14 && score1 === 0 && score2 === 0 && !isLive) return false;
+        if (diffHours > 8 && score1 === 0 && score2 === 0 && !isLive) return false;
       }
     }
     return true;
