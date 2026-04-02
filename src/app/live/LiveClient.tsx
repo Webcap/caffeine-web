@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Sidebar from "@/components/Sidebar";
 
 interface Stream {
   id: string;
@@ -266,42 +267,11 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
       color: "#fff",
       display: "flex"
     }}>
-      {/* Vertical Sidebar */}
-      <aside style={{ 
-        width: "100px", 
-        height: "100vh", 
-        position: "fixed", 
-        left: 0, 
-        top: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "40px 0",
-        borderRight: "1px solid var(--glass-border)",
-        background: "rgba(255,255,255,0.01)",
-        zIndex: 100
-      }}>
-        <a href="/" style={{ textDecoration: "none", color: "inherit", marginBottom: "30px" }}>
-          <div className="sidebar-icon" title="Return Home">
-            <span style={{ fontSize: "1.2rem" }}>🏠</span>
-          </div>
-        </a>
-        <div className="sidebar-icon active" style={{ marginBottom: "40px" }}>
-          <span style={{ fontSize: "1.2rem" }}>📊</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {["📅", "🏆", "📈", "⚙️"].map((icon, i) => (
-            <div key={i} className="sidebar-icon">{icon}</div>
-          ))}
-        </div>
-        <div style={{ marginTop: "auto" }}>
-          <div className="sidebar-icon">👤</div>
-        </div>
-      </aside>
+      <Sidebar />
 
       {/* Main Container */}
       <div style={{ 
-        marginLeft: "100px", 
+        marginLeft: "96px", 
         flex: 1, 
         padding: "40px 60px"
       }}>

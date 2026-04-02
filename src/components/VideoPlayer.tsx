@@ -21,7 +21,6 @@ import {
   ListVideo,
   ExternalLink,
   Gauge,
-  FastForward
 } from "lucide-react";
 import Image from "next/image";
 import Hls from "hls.js";
@@ -298,27 +297,6 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
              </div>
           </div>
 
-          {/* SKIP INTRO */}
-          {isPlaying && currentTime < 85 && (
-             <div style={{ 
-               position: 'absolute', bottom: '180px', right: '48px', 
-               animation: 'slide-up-fade 0.5s ease forwards'
-             }}>
-                <button 
-                  onClick={() => { if(videoRef.current) videoRef.current.currentTime = 85; }}
-                  className="hover:bg-primary backdrop-blur-3xl border border-white/10"
-                  style={{ 
-                    display: 'flex', alignItems: 'center', gap: '16px', backgroundColor: 'rgba(0,0,0,0.6)',
-                    padding: '20px 40px', borderRadius: '24px', fontSize: '24px', fontWeight: 900,
-                    textTransform: 'uppercase', letterSpacing: '0.1em', transition: 'all 0.3s ease',
-                    boxShadow: '0 20px 50px rgba(0,0,0,0.4)', cursor: 'pointer'
-                  }}
-                >
-                   <FastForward size={32} fill="white" strokeWidth={3} />
-                   Skip Intro
-                </button>
-             </div>
-          )}
 
           {/* BOTTOM BAR */}
           <div style={{ 

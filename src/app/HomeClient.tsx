@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Home, 
   Film, 
@@ -16,10 +16,10 @@ import {
   User,
   LogOut
 } from "lucide-react";
-import { useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import ContentRow from "@/components/ContentRow";
+import Sidebar from "@/components/Sidebar";
 import { MediaItem } from "@/lib/tmdb";
 import { supabase } from "@/lib/supabase";
 
@@ -146,43 +146,7 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
         <div className="aurora aurora-3" />
       </div>
 
-      {/* Sidebar Navigation */}
-      <aside className="sidebar">
-         <div style={{ 
-           width: "52px", 
-           height: "52px", 
-           background: "linear-gradient(135deg, var(--primary) 0%, #991b1b 100%)", 
-           borderRadius: "16px", 
-           display: "flex", 
-           alignItems: "center", 
-           justifyContent: "center", 
-           fontSize: "1.4rem", 
-           fontWeight: 900, 
-           marginBottom: "48px", 
-           boxShadow: "0 8px 20px var(--primary-glow)",
-           border: "1px solid rgba(255,255,255,0.2)"
-         }}>
-           C
-         </div>
-
-         <nav style={{ display: "flex", flexDirection: "column", gap: "24px", flex: 1 }}>
-           {navItems.filter(item => item.enabled !== false).map((item) => (
-             <button
-               key={item.id}
-               onClick={() => setActiveTab(item.id)}
-               className={`nav-icon ${activeTab === item.id ? "active" : ""}`}
-               title={item.label}
-             >
-               <item.icon size={22} />
-             </button>
-           ))}
-         </nav>
-
-         <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "auto" }}>
-           <button className="nav-icon" title="Search"><Search size={22} /></button>
-           <button className="nav-icon" title="Settings"><Settings size={22} /></button>
-         </div>
-      </aside>
+      <Sidebar featureFlags={featureFlags} />
 
       {/* Main Content Area */}
       <main className="main-content">
