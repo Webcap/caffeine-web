@@ -20,6 +20,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
+import VideoPlayer from "@/components/VideoPlayer";
 
 interface TitleClientProps {
   details: MediaItem;
@@ -30,6 +31,7 @@ interface TitleClientProps {
 const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, collection = [] }) => {
   const router = useRouter();
   const [watchHistory, setWatchHistory] = useState<{ timesWatched: number, lastWatchedAt: string | null } | null>(null);
+  const [showPlayer, setShowPlayer] = useState(false);
   
   useEffect(() => {
     const fetchWatchHistory = async () => {
@@ -132,7 +134,8 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
                    alt={details.title}
                    width={350}
                    height={525}
-                   style={{ objectFit: "cover", width: "100%", display: "block" }}
+                   style={{ objectFit: "cover", width: "100%", height: "auto", display: "block" }}
+                   priority
                  />
               </div>
            </div>
@@ -216,7 +219,11 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
               </div>
 
               <div className="flex items-center gap-6">
-                 <button className="btn-primary" style={{ padding: "20px 60px", fontSize: "1.2rem", borderRadius: "20px" }}>
+                 <button 
+                  onClick={() => setShowPlayer(true)}
+                  className="btn-primary" 
+                  style={{ padding: "20px 60px", fontSize: "1.2rem", borderRadius: "20px" }}
+                >
                     <Play size={24} fill="currentColor" />
                     Watch Now
                  </button>
@@ -250,6 +257,18 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
           </div>
         )}
       </main>
+
+      {/* Video Player Modal */}
+      {showPlayer && (
+        <VideoPlayer 
+          id={details.id}
+          type={details.media_type === "tv" ? "tv" : "movie"}
+          title={details.title}
+          releaseDate={details.release_date}
+          backdropPath={details.backdrop_path}
+          onClose={() => setShowPlayer(false)}
+        />
+      )}
     </div>
   );
 };

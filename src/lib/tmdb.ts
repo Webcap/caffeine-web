@@ -116,3 +116,16 @@ export async function getCollectionDetails(id: string | number): Promise<MediaIt
   
   return (data.parts || []).map((item: any) => normalizeMediaItem(item, "movie"));
 }
+
+export async function getTvSeason(id: string | number, seasonNumber: number): Promise<MediaItem[]> {
+  const data = await fetchTMDB(`/tv/${id}/season/${seasonNumber}`);
+  if (!data || !data.episodes) return [];
+  
+  return (data.episodes || []).map((ep: any) => ({
+    ...normalizeMediaItem(ep, "tv"),
+    episode_num: ep.episode_number,
+    season_num: ep.season_number,
+    runtime: ep.runtime,
+    overview: ep.overview,
+  }));
+}
