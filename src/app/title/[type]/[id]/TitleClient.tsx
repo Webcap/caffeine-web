@@ -10,20 +10,47 @@ import {
   Clock, 
   ArrowLeft,
   Share2,
-  BookmarkPlus
+  BookmarkPlus,
+  CheckCircle2,
+  History
 } from "lucide-react";
 import { MediaItem } from "@/lib/tmdb";
 import ContentRow from "@/components/ContentRow";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
+import { useEffect, useState } from "react";
 
 interface TitleClientProps {
   details: MediaItem;
   recommendations: MediaItem[];
+  collection?: MediaItem[];
 }
 
-const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations }) => {
+const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, collection = [] }) => {
   const router = useRouter();
+  const [watchHistory, setWatchHistory] = useState<{ timesWatched: number, lastWatchedAt: string | null } | null>(null);
+  
+  useEffect(() => {
+    const fetchWatchHistory = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+
+      const { data: history } = await supabase
+        .from('completed_watch_history')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('media_id', details.id);
+
+      if (history && history.length > 0) {
+        const totalTimes = history.reduce((acc: number, curr: any) => acc + (curr.times_watched || 0), 0);
+        const latestTime = new Date(Math.max(...history.map((h: any) => new Date(h.updated_at).getTime()))).toISOString();
+        setWatchHistory({ timesWatched: totalTimes, lastWatchedAt: latestTime });
+      }
+    };
+
+    fetchWatchHistory();
+  }, [details.id, details.media_type, details.title]);
   
   const backdropUrl = details.backdrop_path 
     ? `https://image.tmdb.org/t/p/original${details.backdrop_path}` 
@@ -126,11 +153,35 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations }) =
                 {details.title}
               </h1>
 
-              {details.tagline && (
-                <p style={{ fontSize: "1.4rem", fontStyle: "italic", color: "var(--text-muted)", marginBottom: "32px", opacity: 0.8 }}>
-                  "{details.tagline}"
-                </p>
-              )}
+              <div className="flex flex-col gap-4" style={{ marginBottom: "32px" }}>
+                {details.tagline && (
+                  <p style={{ fontSize: "1.4rem", fontStyle: "italic", color: "var(--text-muted)", opacity: 0.8 }}>
+                    "{details.tagline}"
+                  </p>
+                )}
+
+                {watchHistory && (
+                  <div style={{ 
+                    display: "flex", 
+                    alignItems: "center", 
+                    gap: "12px", 
+                    color: "rgba(255,255,255,0.5)",
+                    fontSize: "0.95rem",
+                    fontWeight: 600
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <History size={16} />
+                      <span>Watched {watchHistory.timesWatched} {watchHistory.timesWatched === 1 ? 'time' : 'times'}</span>
+                    </div>
+                    {watchHistory.lastWatchedAt && (
+                      <>
+                        <span style={{ opacity: 0.3 }}>•</span>
+                        <span>Last watched {new Date(watchHistory.lastWatchedAt).toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</span>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
 
               <div className="flex items-center gap-8" style={{ marginBottom: "40px" }}>
                  <div className="flex items-center gap-2" style={{ color: "#fbbf24", fontSize: "1.1rem", fontWeight: 800 }}>
@@ -179,9 +230,19 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations }) =
            </div>
         </div>
 
+        {/* Collection Section */}
+        {collection.length > 0 && (
+          <div style={{ marginTop: "60px" }}>
+             <ContentRow 
+               title={`More from the ${details.belongs_to_collection?.name || 'Series'}`}
+               items={collection} 
+             />
+          </div>
+        )}
+
         {/* Recommendations Section */}
         {recommendations.length > 0 && (
-          <div style={{ marginTop: "40px" }}>
+          <div style={{ marginTop: collection.length > 0 ? "20px" : "40px" }}>
              <ContentRow 
                title="You Might Also Like" 
                items={recommendations.slice(0, 10)} 

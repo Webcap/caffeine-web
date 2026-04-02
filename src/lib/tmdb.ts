@@ -24,6 +24,14 @@ export interface MediaItem {
   episode_name?: string;
   season_num?: number;
   episode_num?: number;
+
+  // Collection fields
+  belongs_to_collection?: {
+    id: number;
+    name: string;
+    poster_path: string;
+    backdrop_path: string;
+  } | null;
 }
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
@@ -93,10 +101,18 @@ export async function getMediaDetails(id: string | number, type: string): Promis
     number_of_seasons: data.number_of_seasons,
     number_of_episodes: data.number_of_episodes,
     last_air_date: data.last_air_date,
+    belongs_to_collection: data.belongs_to_collection,
   };
 }
 
 export async function getRecommendations(id: string | number, type: string): Promise<MediaItem[]> {
   const data = await fetchTMDB(`/${type}/${id}/recommendations`);
   return (data.results || []).map((item: any) => normalizeMediaItem(item, type));
+}
+
+export async function getCollectionDetails(id: string | number): Promise<MediaItem[]> {
+  const data = await fetchTMDB(`/collection/${id}`);
+  if (!data || !data.parts) return [];
+  
+  return (data.parts || []).map((item: any) => normalizeMediaItem(item, "movie"));
 }
