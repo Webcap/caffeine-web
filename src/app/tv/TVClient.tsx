@@ -1,12 +1,13 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Play, Info, TrendingUp } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import ContentRow from "@/components/ContentRow";
-import { MediaItem } from "@/lib/tmdb";
+import { MediaItem, getTvSeason, getTvDetails } from "@/lib/tmdb";
+import { supabase } from "@/lib/supabase";
 
 interface TVClientProps {
   trending: MediaItem[];
@@ -15,7 +16,133 @@ interface TVClientProps {
 }
 
 const TVClient: React.FC<TVClientProps> = ({ trending, popular, topRated }) => {
+  const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
+  const [upNext, setUpNext] = useState<MediaItem[]>([]);
   const featured = trending[0];
+
+  useEffect(() => {
+    const fetchHistoryAndUpNext = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from('continue_watching_history')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('media_type', 'tv')
+        .order('updated_at', { ascending: false });
+
+      if (!error && data) {
+        console.log("[TV HUB] 📜 History fetched:", data.length, "items");
+        
+        // --- 1. Process Continue Watching ---
+        const deduped: MediaItem[] = [];
+        const seenIds = new Set<string | number>();
+        const completedShows: any[] = [];
+
+        for (const item of data) {
+          const progress = (item.elapsed_ms || 0) / (item.duration_ms || 1);
+          
+          if (!seenIds.has(item.media_id)) {
+            seenIds.add(item.media_id);
+            
+            // Logic: If user is halfway through, it's Continue Watching.
+            // If they are near the end (>90%) OR explicitly completed, suggest the NEXT episode in Up Next.
+            if (!item.is_completed && progress < 0.9) {
+              deduped.push({
+                id: item.media_id,
+                title: item.title,
+                poster_path: item.poster_path,
+                backdrop_path: item.backdrop_path,
+                media_type: item.media_type,
+                progress: progress,
+              });
+            } else {
+              completedShows.push(item);
+            }
+          }
+        }
+        setContinueWatching(deduped);
+        console.log("[TV HUB] ✅ Continue Watching:", deduped.length, "| Completed Shows Candidates:", completedShows.length);
+
+        // --- 2. Process Up Next (Next Episode) ---
+        const nextItems: MediaItem[] = [];
+        const now = new Date();
+
+        for (const show of completedShows.slice(0, 10)) {
+          try {
+            const seasonNum = show.season_num || 1;
+            const epNum = show.episode_num || 1;
+            
+            console.log(`[TV HUB] 🔍 Calculating Up Next for: ${show.title} (S${seasonNum}E${epNum})`);
+
+            // Check current season
+            const seasonData = await getTvSeason(show.media_id, seasonNum);
+            let nextEp = seasonData.episodes?.find((e: any) => e.episode_number === epNum + 1);
+
+            if (nextEp) {
+              const airDate = nextEp.air_date ? new Date(nextEp.air_date) : null;
+              if (!airDate || airDate <= now) {
+                console.log(`[TV HUB] ✨ Found Next Ep: ${show.title} S${seasonNum}E${nextEp.episode_number}`);
+                nextItems.push({
+                  id: show.media_id,
+                  title: show.title,
+                  poster_path: show.poster_path,
+                  backdrop_path: nextEp.still_path || show.backdrop_path,
+                  media_type: 'tv',
+                  episode_name: nextEp.name,
+                  season_num: seasonNum,
+                  episode_num: nextEp.episode_number,
+                });
+                continue;
+              }
+            }
+
+            // Check next season
+            const showDetails = await getTvDetails(show.media_id);
+            if (seasonNum < (showDetails.number_of_seasons || 0)) {
+              const nextSeasonData = await getTvSeason(show.media_id, seasonNum + 1);
+              const firstEp = nextSeasonData.episodes?.[0];
+              if (firstEp) {
+                const airDate = firstEp.air_date ? new Date(firstEp.air_date) : null;
+                if (!airDate || airDate <= now) {
+                   console.log(`[TV HUB] ✨ Found Next Season Ep: ${show.title} S${seasonNum + 1}E1`);
+                   nextItems.push({
+                    id: show.media_id,
+                    title: show.title,
+                    poster_path: show.poster_path,
+                    backdrop_path: firstEp.still_path || show.backdrop_path,
+                    media_type: 'tv',
+                    episode_name: firstEp.name,
+                    season_num: seasonNum + 1,
+                    episode_num: firstEp.episode_number,
+                  });
+                }
+              }
+            }
+          } catch (err) {
+            console.error(`[TV HUB] ❌ Error fetching next ep for ${show.title}:`, err);
+          }
+        }
+        
+        console.log("[TV HUB] 🏁 Final Up Next Items:", nextItems.length);
+        setUpNext(nextItems);
+      }
+    };
+
+    fetchHistoryAndUpNext();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        fetchHistoryAndUpNext();
+      } else {
+        setContinueWatching([]);
+        setUpNext([]);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   return (
     <div style={{ minHeight: "100vh", position: "relative" }}>
@@ -81,6 +208,12 @@ const TVClient: React.FC<TVClientProps> = ({ trending, popular, topRated }) => {
 
         {/* Categories */}
         <div style={{ marginTop: "-80px", position: "relative", zIndex: 20, paddingBottom: "100px" }}>
+          {continueWatching.length > 0 && (
+            <ContentRow title="Continue Watching" items={continueWatching} />
+          )}
+          {upNext.length > 0 && (
+            <ContentRow title="Up Next" items={upNext} />
+          )}
           <ContentRow title="Trending This Week" items={trending} />
           <ContentRow title="Popular Shows" items={popular} />
           <ContentRow title="Top Rated Series" items={topRated} />

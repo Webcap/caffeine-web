@@ -26,6 +26,7 @@ import Image from "next/image";
 import Hls from "hls.js";
 import { fetchStreamLinks, fetchEpisodes, StreamLink } from "@/lib/api";
 import { MediaItem } from "@/lib/tmdb";
+import { supabase } from "@/lib/supabase";
 
 interface VideoPlayerProps {
   id: string | number;
@@ -143,6 +144,46 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       video.playbackRate = playbackSpeed;
     }
   }, [isLoaded, streamUrl, playbackSpeed]);
+
+  // --- SAVE WATCH PROGRESS ---
+  useEffect(() => {
+    if (!isLoaded || !videoRef.current) return;
+
+    const saveProgress = async () => {
+      const video = videoRef.current;
+      if (!video || !video.currentTime || !video.duration) return;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const progress = video.currentTime / video.duration;
+      const isCompleted = progress > 0.9;
+
+      const { error } = await supabase
+        .from('continue_watching_history')
+        .upsert({
+          user_id: session.user.id,
+          media_id: id,
+          media_type: type,
+          title: title,
+          poster_path: backdropPath || "", // Using backdrop as poster for row consistency
+          backdrop_path: backdropPath || "",
+          elapsed_ms: Math.floor(video.currentTime * 1000),
+          duration_ms: Math.floor(video.duration * 1000),
+          is_completed: isCompleted,
+          season_num: type === 'tv' ? curSeason : null,
+          episode_num: type === 'tv' ? curEpisode : null,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,media_id,season_num,episode_num'
+        });
+
+      if (error) console.error("Error saving progress:", error);
+    };
+
+    const interval = setInterval(saveProgress, 15000); // Save every 15s
+    return () => clearInterval(interval);
+  }, [isLoaded, id, type, title, backdropPath, curSeason, curEpisode]);
 
   const togglePlay = () => {
     if (videoRef.current) {

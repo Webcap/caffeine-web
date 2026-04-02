@@ -1,12 +1,13 @@
 "use client";
 
-import React from "react";
+import React, { useState, useEffect } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Play, Info, Award } from "lucide-react";
 import Sidebar from "@/components/Sidebar";
 import ContentRow from "@/components/ContentRow";
 import { MediaItem } from "@/lib/tmdb";
+import { supabase } from "@/lib/supabase";
 
 interface MoviesClientProps {
   trending: MediaItem[];
@@ -15,7 +16,55 @@ interface MoviesClientProps {
 }
 
 const MoviesClient: React.FC<MoviesClientProps> = ({ trending, popular, topRated }) => {
+  const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
   const featured = trending[0];
+
+  useEffect(() => {
+    const fetchContinueWatching = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const { data, error } = await supabase
+        .from('continue_watching_history')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .eq('media_type', 'movie')
+        .order('updated_at', { ascending: false });
+
+      if (!error && data) {
+        // Deduplicate logic
+        const deduped: MediaItem[] = [];
+        const seenIds = new Set<string | number>();
+
+        for (const item of data) {
+          if (!seenIds.has(item.media_id)) {
+            seenIds.add(item.media_id);
+            deduped.push({
+              id: item.media_id,
+              title: item.title,
+              poster_path: item.poster_path,
+              backdrop_path: item.backdrop_path,
+              media_type: item.media_type,
+              progress: (item.elapsed_ms || 0) / (item.duration_ms || 1),
+            });
+          }
+        }
+        setContinueWatching(deduped);
+      }
+    };
+
+    fetchContinueWatching();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) {
+        fetchContinueWatching();
+      } else {
+        setContinueWatching([]);
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   return (
     <div style={{ minHeight: "100vh", position: "relative" }}>
@@ -81,6 +130,9 @@ const MoviesClient: React.FC<MoviesClientProps> = ({ trending, popular, topRated
 
         {/* Categories */}
         <div style={{ marginTop: "-80px", position: "relative", zIndex: 20, paddingBottom: "100px" }}>
+          {continueWatching.length > 0 && (
+            <ContentRow title="Continue Watching" items={continueWatching} />
+          )}
           <ContentRow title="Trending Movies" items={trending} />
           <ContentRow title="Popular Hits" items={popular} />
           <ContentRow title="Critically Acclaimed" items={topRated} />
