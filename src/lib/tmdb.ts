@@ -81,8 +81,28 @@ export async function getTrendingMovies(): Promise<MediaItem[]> {
   return (data.results || []).map((item: any) => normalizeMediaItem(item, "movie"));
 }
 
+export async function getPopularMovies(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/movie/popular");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "movie"));
+}
+
+export async function getTopRatedMovies(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/movie/top_rated");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "movie"));
+}
+
 export async function getTrendingTV(): Promise<MediaItem[]> {
   const data = await fetchTMDB("/trending/tv/day");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "tv"));
+}
+
+export async function getPopularTV(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/tv/popular");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "tv"));
+}
+
+export async function getTopRatedTV(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/tv/top_rated");
   return (data.results || []).map((item: any) => normalizeMediaItem(item, "tv"));
 }
 

@@ -22,8 +22,8 @@ const Sidebar: React.FC<SidebarProps> = ({ featureFlags }) => {
 
   const navItems = [
     { id: "home", icon: Home, label: "Home", path: "/" },
-    { id: "movies", icon: Film, label: "Movies", path: "/#movies" },
-    { id: "tv", icon: Tv, label: "TV Shows", path: "/#tv" },
+    { id: "movies", icon: Film, label: "Movies", path: "/movies" },
+    { id: "tv", icon: Tv, label: "TV Shows", path: "/tv" },
     { 
       id: "live", 
       icon: Trophy, 
