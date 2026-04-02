@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.101.1",
     "hls.js": "^1.6.15",
     "lucide-react": "^1.7.0",
     "mixpanel-browser": "^2.55.0",

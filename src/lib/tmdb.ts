@@ -7,6 +7,15 @@ export interface MediaItem {
   release_date?: string;
   media_type?: string;
   overview?: string;
+  
+  // Extra fields for details page
+  genres?: string[];
+  runtime?: number | null;
+  status?: string;
+  tagline?: string;
+  number_of_seasons?: number;
+  number_of_episodes?: number;
+  last_air_date?: string;
 }
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;
@@ -59,4 +68,27 @@ export async function getTrendingMovies(): Promise<MediaItem[]> {
 export async function getTrendingTV(): Promise<MediaItem[]> {
   const data = await fetchTMDB("/trending/tv/day");
   return (data.results || []).map((item: any) => normalizeMediaItem(item, "tv"));
+}
+
+export async function getMediaDetails(id: string | number, type: string): Promise<MediaItem | null> {
+  const data = await fetchTMDB(`/${type}/${id}`);
+  if (!data || !data.id) return null;
+  
+  const item = normalizeMediaItem(data, type);
+  // Add extra fields for details page
+  return {
+    ...item,
+    genres: data.genres?.map((g: any) => g.name) || [],
+    runtime: data.runtime || (data.episode_run_time ? data.episode_run_time[0] : null),
+    status: data.status,
+    tagline: data.tagline,
+    number_of_seasons: data.number_of_seasons,
+    number_of_episodes: data.number_of_episodes,
+    last_air_date: data.last_air_date,
+  };
+}
+
+export async function getRecommendations(id: string | number, type: string): Promise<MediaItem[]> {
+  const data = await fetchTMDB(`/${type}/${id}/recommendations`);
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, type));
 }
