@@ -12,12 +12,15 @@ import {
   Trophy,
   History,
   TrendingUp,
-  Monitor
+  Monitor,
+  User,
+  LogOut
 } from "lucide-react";
+import { useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import ContentRow from "@/components/ContentRow";
-import { MediaItem } from "@/components/PosterCard";
+import { MediaItem } from "@/lib/tmdb";
 import { supabase } from "@/lib/supabase";
 
 interface HomeClientProps {
@@ -30,16 +33,72 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
   const [scrolled, setScrolled] = useState(false);
   const [featured, setFeatured] = useState<MediaItem | null>(null);
   const [user, setUser] = useState<any>(null);
+  const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const fetchContinueWatching = async (userId: string) => {
+      try {
+        const { data, error } = await supabase
+          .from('continue_watching_history')
+          .select('*')
+          .eq('user_id', userId)
+          .order('updated_at', { ascending: false });
+
+        if (error) {
+           console.error("Error fetching continue watching:", error);
+           return;
+        }
+
+        if (data) {
+          // Deduplicate logic: only show the latest entry per unique media_id
+          const deduped: any[] = [];
+          const seenIds = new Set<string | number>();
+
+          for (const item of data) {
+            if (!seenIds.has(item.media_id)) {
+              seenIds.add(item.media_id);
+              deduped.push({
+                id: item.media_id,
+                title: item.title,
+                poster_path: item.poster_path,
+                backdrop_path: item.backdrop_path,
+                media_type: item.media_type,
+                progress: (item.elapsed_ms || 0) / (item.duration_ms || 1),
+                elapsed_ms: item.elapsed_ms,
+                duration_ms: item.duration_ms,
+                episode_name: item.episode_name,
+                season_num: item.season_num,
+                episode_num: item.episode_num
+              });
+            }
+          }
+          setContinueWatching(deduped);
+        }
+      } catch (err) {
+        console.error("Failed to fetch continue watching:", err);
+      }
+    };
+
     // 1. Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null);
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        fetchContinueWatching(currentUser.id);
+      }
     });
 
     // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      const currentUser = session?.user ?? null;
+      setUser(currentUser);
+      if (currentUser) {
+        fetchContinueWatching(currentUser.id);
+      } else {
+        setContinueWatching([]);
+      }
     });
 
     if (initialRecommendations.length > 0) {
@@ -49,10 +108,19 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
     };
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsProfileOpen(false);
+      }
+    };
+
     window.addEventListener("scroll", handleScroll);
+    document.addEventListener("mousedown", handleClickOutside);
     
     return () => {
       window.removeEventListener("scroll", handleScroll);
+      document.removeEventListener("mousedown", handleClickOutside);
       subscription.unsubscribe();
     };
   }, [initialRecommendations]);
@@ -180,6 +248,13 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
          </section>
 
          <div style={{ marginTop: "-120px", position: "relative", zIndex: 20, paddingBottom: "100px" }}>
+            {continueWatching.length > 0 && (
+              <ContentRow 
+                title="Continue Watching" 
+                items={continueWatching} 
+              />
+            )}
+
             <ContentRow 
               title="Recommended For You" 
               items={initialRecommendations.slice(0, 10)} 
@@ -214,40 +289,94 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
         backdropFilter: scrolled ? "var(--glass-blur)" : "none",
         borderBottom: scrolled ? "1px solid var(--glass-border)" : "none"
       }}>
-         <div className="flex items-center gap-6">
+          <div className="flex items-center gap-6">
             <button className="nav-icon" style={{ borderRadius: "50%" }}>
                <Search size={20} />
             </button>
 
-            {user && (
-              <div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
-                <span style={{ fontSize: "0.85rem", fontWeight: 700, opacity: 0.8, letterSpacing: "0.02em" }}>
-                  {user.user_metadata?.full_name || user.email}
-                </span>
-                <button 
-                  onClick={handleLogout} 
-                  className="auth-link" 
-                  style={{ fontSize: "0.8rem", background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                >
-                  Log Out
-                </button>
-              </div>
-            )}
+            {/* Username removed from header per request */}
 
-            <Link href={user ? "/download" : "/login"} style={{ 
-              width: "44px", 
-              height: "44px", 
-              borderRadius: "16px", 
-              background: "linear-gradient(135deg, var(--primary), var(--accent-blue))", 
-              padding: "2px",
-              cursor: "pointer",
-              boxShadow: "0 4px 15px rgba(0,0,0,0.3)"
-            }}>
-               <div style={{ width: "100%", height: "100%", borderRadius: "14px", background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                  <Image src="/assets/images/Default_pfp.svg" alt="Avatar" width={40} height={40} />
-               </div>
-            </Link>
-         </div>
+            <div className="profile-container" ref={dropdownRef}>
+              <button 
+                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                style={{ 
+                  width: "44px", 
+                  height: "44px", 
+                  borderRadius: "50%", 
+                  background: "linear-gradient(135deg, var(--primary), var(--accent-blue))", 
+                  padding: "2px",
+                  cursor: "pointer",
+                  boxShadow: "0 4px 15px rgba(0,0,0,0.3)",
+                  border: "none",
+                  display: "block"
+                }}
+              >
+                <div style={{ width: "100%", height: "100%", borderRadius: "50%", background: "#1a1a1a", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                  <Image 
+                    src={(() => {
+                      const avatar = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || user?.user_metadata?.avatar;
+                      if (!avatar) return "/assets/images/Default_pfp.svg";
+                      if (avatar.startsWith("http")) return avatar;
+                      if (avatar.includes("/")) return avatar;
+                      // Fallback for ID-based profile pics in assets/images/profiles
+                      return `/assets/images/profiles/${avatar}${avatar.includes(".") ? "" : ".png"}`;
+                    })()} 
+                    alt="Avatar" 
+                    width={40} 
+                    height={40} 
+                    className="object-cover"
+                    unoptimized={true}
+                    onError={(e) => {
+                      (e.target as HTMLImageElement).src = "/assets/images/Default_pfp.svg";
+                    }}
+                  />
+                </div>
+              </button>
+
+              {isProfileOpen && (
+                <div className="profile-dropdown">
+                  {user ? (
+                    <>
+                      <div className="dropdown-header">
+                        <div className="dropdown-name">@{user.user_metadata?.username || user.email?.split('@')[0]}</div>
+                        <div className="dropdown-email">{user.email}</div>
+                      </div>
+                      
+                      <button className="dropdown-item">
+                        <User size={18} />
+                        View Profile
+                      </button>
+                      <button className="dropdown-item">
+                        <Settings size={18} />
+                        Account Settings
+                      </button>
+                      <div style={{ height: "1px", background: "var(--glass-border)", margin: "8px 0" }} />
+                      <button 
+                        onClick={handleLogout} 
+                        className="dropdown-item danger"
+                      >
+                        <LogOut size={18} />
+                        Log Out
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <div className="dropdown-header">
+                        <div className="dropdown-name">Welcome to Caffeine</div>
+                        <div className="dropdown-email">Sign in to sync your progress</div>
+                      </div>
+                      <Link href="/login" style={{ width: "100%" }}>
+                        <button className="dropdown-item">
+                          <LogOut size={18} style={{ transform: "rotate(180deg)" }} />
+                          Sign In
+                        </button>
+                      </Link>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
       </div>
     </div>
   );

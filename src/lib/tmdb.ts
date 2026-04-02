@@ -16,6 +16,14 @@ export interface MediaItem {
   number_of_seasons?: number;
   number_of_episodes?: number;
   last_air_date?: string;
+  
+  // Continue Watching / Progress fields
+  progress?: number; // 0 to 1
+  elapsed_ms?: number;
+  duration_ms?: number;
+  episode_name?: string;
+  season_num?: number;
+  episode_num?: number;
 }
 
 const TMDB_API_KEY = process.env.TMDB_API_KEY;

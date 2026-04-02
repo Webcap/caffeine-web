@@ -1,7 +1,8 @@
 "use client";
  
 import React, { useRef } from "react";
-import PosterCard, { MediaItem } from "./PosterCard";
+import PosterCard from "./PosterCard";
+import { MediaItem } from "@/lib/tmdb";
 import { ChevronLeft, ChevronRight } from "lucide-react";
  
 interface ContentRowProps {

@@ -1,20 +1,9 @@
 "use client";
  
-import React from "react";
+import { MediaItem } from "@/lib/tmdb";
 import Image from "next/image";
 import { Play, Star, Plus } from "lucide-react";
 import Link from "next/link";
- 
-export interface MediaItem {
-  id: number | string;
-  title: string;
-  poster_path?: string;
-  backdrop_path?: string;
-  vote_average?: number;
-  release_date?: string;
-  media_type?: string;
-  overview?: string;
-}
  
 interface PosterCardProps {
   item: MediaItem;
@@ -82,6 +71,25 @@ const PosterCard: React.FC<PosterCardProps> = ({ item, priority = false }) => {
           }}>
             <Star size={12} fill="currentColor" />
             {item.vote_average.toFixed(1)}
+          </div>
+        )}
+
+        {item.progress !== undefined && (
+          <div style={{ 
+            position: "absolute", 
+            bottom: "0", 
+            left: "0", 
+            width: "100%", 
+            height: "4px", 
+            background: "rgba(255,255,255,0.2)",
+            zIndex: 30
+          }}>
+            <div style={{ 
+              width: `${Math.min(100, Math.max(0, item.progress * 100))}%`, 
+              height: "100%", 
+              background: "var(--primary)",
+              boxShadow: "0 0 10px var(--primary)"
+            }} />
           </div>
         )}
       </div>
