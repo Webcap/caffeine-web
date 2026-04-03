@@ -23,6 +23,7 @@ import ContentRow from "@/components/ContentRow";
 import Sidebar from "@/components/Sidebar";
 import { MediaItem } from "@/lib/tmdb";
 import { supabase } from "@/lib/supabase";
+import { getMovieQuality } from "@/lib/scraper";
 
 interface HomeClientProps {
   initialRecommendations: MediaItem[];
@@ -46,6 +47,7 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
   const [user, setUser] = useState<any>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
+  const [heroQualityMap, setHeroQualityMap] = useState<Record<string, string>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
   const slideInterval = useRef<NodeJS.Timeout | null>(null);
 
@@ -177,6 +179,19 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
     };
   }, [heroSlides.length]);
 
+  useEffect(() => {
+    const fetchHeroQualities = async () => {
+      const mediaSlides = heroSlides.filter(s => s.type === "media");
+      for (const slide of mediaSlides) {
+        const q = await getMovieQuality(slide.id);
+        if (q && q !== "Unknown") {
+          setHeroQualityMap(prev => ({ ...prev, [slide.id]: q.toUpperCase() }));
+        }
+      }
+    };
+    if (heroSlides.length > 0) fetchHeroQualities();
+  }, [initialRecommendations, featuredEvents]);
+
   return (
     <div style={{ minHeight: "100vh", position: "relative" }}>
       {/* Background Auroras */}
@@ -231,6 +246,15 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
                             <TrendingUp size={16} />
                             <span>RANKED #{index + 1} TODAY</span>
                           </div>
+                          {heroQualityMap[slide.id] && (
+                             <div className="badge" style={{ 
+                               background: heroQualityMap[slide.id] === "CAM" || heroQualityMap[slide.id] === "TS" ? "rgba(234, 179, 8, 0.95)" : "rgba(255, 255, 255, 0.15)",
+                               color: heroQualityMap[slide.id] === "CAM" || heroQualityMap[slide.id] === "TS" ? "#000" : "#fff",
+                               fontWeight: 900
+                             }}>
+                               {heroQualityMap[slide.id]}
+                             </div>
+                          )}
                         </>
                       ) : (
                         <>

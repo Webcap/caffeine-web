@@ -6,6 +6,7 @@ import { Play, Star, Plus, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
+import { getMovieQuality } from "@/lib/scraper";
  
 interface PosterCardProps {
   item: MediaItem;
@@ -15,6 +16,7 @@ interface PosterCardProps {
 const PosterCard: React.FC<PosterCardProps> = ({ item, priority = false }) => {
   const [isWatched, setIsWatched] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [quality, setQuality] = useState<string | null>(null);
 
   useEffect(() => {
     const checkWatchedStatus = async () => {
@@ -33,8 +35,19 @@ const PosterCard: React.FC<PosterCardProps> = ({ item, priority = false }) => {
       }
     };
 
+    const fetchQuality = async () => {
+      const isMovie = item.media_type === "movie" || (!!item.title && item.media_type !== "tv");
+      if (!isMovie) return;
+      
+      const q = await getMovieQuality(item.id);
+      if (q && q !== "Unknown") {
+        setQuality(q.toUpperCase());
+      }
+    };
+
     checkWatchedStatus();
-  }, [item.id]);
+    fetchQuality();
+  }, [item.id, item.media_type]);
 
   const handleToggleWatched = async (e: React.MouseEvent) => {
     e.preventDefault();
@@ -168,6 +181,27 @@ const PosterCard: React.FC<PosterCardProps> = ({ item, priority = false }) => {
             display: "flex"
           }}>
             <CheckCircle2 size={14} fill="currentColor" />
+          </div>
+        )}
+
+        {quality && (
+          <div style={{ 
+            position: "absolute", 
+            bottom: item.progress !== undefined ? "24px" : "14px", 
+            right: "14px", 
+            zIndex: 25, 
+            background: quality === "CAM" || quality === "TS" ? "rgba(234, 179, 8, 0.95)" : "rgba(255, 255, 255, 0.1)", 
+            color: quality === "CAM" || quality === "TS" ? "#000" : "#fff",
+            padding: "4px 10px", 
+            borderRadius: "8px", 
+            fontSize: "10px", 
+            fontWeight: 900,
+            letterSpacing: "0.05em",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            boxShadow: "0 4px 15px rgba(0,0,0,0.4)"
+          }}>
+            {quality}
           </div>
         )}
 

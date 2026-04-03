@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
 import VideoPlayer from "@/components/VideoPlayer";
+import { getMovieQuality } from "@/lib/scraper";
 
 interface TitleClientProps {
   details: MediaItem;
@@ -32,6 +33,7 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
   const router = useRouter();
   const [watchHistory, setWatchHistory] = useState<{ timesWatched: number, lastWatchedAt: string | null } | null>(null);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [quality, setQuality] = useState<string | null>(null);
   
   const fetchWatchHistory = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -54,6 +56,15 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
 
   useEffect(() => {
     fetchWatchHistory();
+    
+    const fetchQuality = async () => {
+      if (details.media_type === "tv") return;
+      const q = await getMovieQuality(details.id);
+      if (q && q !== "Unknown") {
+        setQuality(q.toUpperCase());
+      }
+    };
+    fetchQuality();
   }, [details.id, details.media_type, details.title]);
 
   const handleToggleWatched = async () => {
@@ -180,6 +191,15 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
            <div className="animate-fade-in" style={{ flex: 1, paddingTop: "80px" }}>
               <div className="flex items-center gap-4">
                  <div className="badge">{details.media_type?.toUpperCase()}</div>
+                 {quality && (
+                   <div className="badge" style={{ 
+                     background: quality === "CAM" || quality === "TS" ? "rgba(234, 179, 8, 0.95)" : "rgba(255, 255, 255, 0.15)",
+                     color: quality === "CAM" || quality === "TS" ? "#000" : "#fff",
+                     fontWeight: 900
+                   }}>
+                     {quality}
+                   </div>
+                 )}
                  {details.genres?.map((genre, i) => (
                    <span key={i} style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.9rem", fontWeight: 600 }}>
                      {genre}
