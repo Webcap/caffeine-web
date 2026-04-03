@@ -156,21 +156,17 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
 
-      const progress = video.currentTime / video.duration;
-      const isCompleted = progress > 0.9;
-
       const { error } = await supabase
         .from('continue_watching_history')
         .upsert({
           user_id: session.user.id,
-          media_id: id,
+          media_id: parseInt(id.toString()), // bigint in DB
           media_type: type,
           title: title,
-          poster_path: backdropPath || "", // Using backdrop as poster for row consistency
+          poster_path: backdropPath || "", 
           backdrop_path: backdropPath || "",
           elapsed_ms: Math.floor(video.currentTime * 1000),
           duration_ms: Math.floor(video.duration * 1000),
-          is_completed: isCompleted,
           season_num: type === 'tv' ? curSeason : null,
           episode_num: type === 'tv' ? curEpisode : null,
           updated_at: new Date().toISOString()
@@ -178,7 +174,13 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           onConflict: 'user_id,media_id,season_num,episode_num'
         });
 
-      if (error) console.error("Error saving progress:", error);
+      if (error) {
+        console.error("❌ [VideoPlayer] Progress Sync Error:",
+          error.message,
+          "| Code:", error.code,
+          "| Details:", error.details
+        );
+      }
     };
 
     const interval = setInterval(saveProgress, 15000); // Save every 15s
