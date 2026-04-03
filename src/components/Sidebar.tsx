@@ -79,12 +79,20 @@ const Sidebar: React.FC<SidebarProps> = ({ featureFlags }) => {
 
       {/* Bottom Nav */}
       <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "auto" }}>
-        <button className="nav-icon" title="Search">
+        <Link 
+          href="/search"
+          className={`nav-icon ${isActive("/search") ? "active" : ""}`}
+          title="Search"
+        >
            <Search size={22} />
-        </button>
-        <button className="nav-icon" title="Settings">
+        </Link>
+        <Link 
+          href="/settings"
+          className={`nav-icon ${isActive("/settings") ? "active" : ""}`}
+          title="Settings"
+        >
            <Settings size={22} />
-        </button>
+        </Link>
       </div>
     </aside>
   );

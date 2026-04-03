@@ -33,26 +33,62 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
   const [watchHistory, setWatchHistory] = useState<{ timesWatched: number, lastWatchedAt: string | null } | null>(null);
   const [showPlayer, setShowPlayer] = useState(false);
   
+  const fetchWatchHistory = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    const { data: history } = await supabase
+      .from('completed_watch_history')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .eq('media_id', details.id);
+
+    if (history && history.length > 0) {
+      const totalTimes = history.reduce((acc: number, curr: any) => acc + (curr.times_watched || 0), 0);
+      const latestTime = new Date(Math.max(...history.map((h: any) => new Date(h.updated_at).getTime()))).toISOString();
+      setWatchHistory({ timesWatched: totalTimes, lastWatchedAt: latestTime });
+    } else {
+      setWatchHistory(null);
+    }
+  };
+
   useEffect(() => {
-    const fetchWatchHistory = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
-
-      const { data: history } = await supabase
-        .from('completed_watch_history')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .eq('media_id', details.id);
-
-      if (history && history.length > 0) {
-        const totalTimes = history.reduce((acc: number, curr: any) => acc + (curr.times_watched || 0), 0);
-        const latestTime = new Date(Math.max(...history.map((h: any) => new Date(h.updated_at).getTime()))).toISOString();
-        setWatchHistory({ timesWatched: totalTimes, lastWatchedAt: latestTime });
-      }
-    };
-
     fetchWatchHistory();
   }, [details.id, details.media_type, details.title]);
+
+  const handleToggleWatched = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      alert("Please log in to track your viewing history!");
+      return;
+    }
+
+    if (watchHistory && watchHistory.timesWatched > 0) {
+      // Remove all records for this item to 'unmark' it
+      const { error } = await supabase
+        .from('completed_watch_history')
+        .delete()
+        .eq('user_id', session.user.id)
+        .eq('media_id', details.id);
+      
+      if (!error) fetchWatchHistory();
+    } else {
+      // Add a new record
+      const { error } = await supabase
+        .from('completed_watch_history')
+        .insert({
+          user_id: session.user.id,
+          media_id: details.id,
+          media_type: details.media_type || (details.title ? 'movie' : 'tv'),
+          title: details.title,
+          poster_path: details.poster_path,
+          times_watched: 1,
+          updated_at: new Date().toISOString()
+        });
+      
+      if (!error) fetchWatchHistory();
+    }
+  };
   
   const backdropUrl = details.backdrop_path 
     ? `https://image.tmdb.org/t/p/original${details.backdrop_path}` 
@@ -227,8 +263,20 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
                     <Play size={24} fill="currentColor" />
                     Watch Now
                  </button>
-                 <button className="btn-secondary" style={{ padding: "20px 32px", borderRadius: "20px" }}>
+                  <button className="btn-secondary" style={{ padding: "20px 32px", borderRadius: "20px" }}>
                     <BookmarkPlus size={24} />
+                 </button>
+                 <button 
+                  onClick={handleToggleWatched}
+                  className="btn-secondary" 
+                  style={{ 
+                    padding: "20px 32px", 
+                    borderRadius: "20px",
+                    background: (watchHistory?.timesWatched || 0) > 0 ? "rgba(16, 185, 129, 0.2)" : "rgba(255,255,255,0.05)",
+                    border: (watchHistory?.timesWatched || 0) > 0 ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid var(--glass-border)",
+                    color: (watchHistory?.timesWatched || 0) > 0 ? "var(--win-green)" : "#fff"
+                  }}>
+                    <CheckCircle2 size={24} fill={(watchHistory?.timesWatched || 0) > 0 ? "currentColor" : "none"} />
                  </button>
                  <button className="btn-secondary" style={{ padding: "20px 32px", borderRadius: "20px" }}>
                     <Share2 size={24} />

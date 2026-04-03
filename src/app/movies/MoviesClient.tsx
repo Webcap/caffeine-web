@@ -90,7 +90,7 @@ const MoviesClient: React.FC<MoviesClientProps> = ({ trending, popular, topRated
                 priority
               />
               <div className="hero-overlay-dark" />
-              <div className="hero-content animate-fade-in" style={{ bottom: "80px" }}>
+              <div className="hero-content animate-fade-in" style={{ left: "60px", bottom: "120px" }}>
                 <div className="flex items-center gap-4">
                   <div className="badge" style={{ backgroundColor: "var(--primary)", borderColor: "rgba(220, 38, 38, 0.3)" }}>
                     BLOCKBUSTER
@@ -129,7 +129,7 @@ const MoviesClient: React.FC<MoviesClientProps> = ({ trending, popular, topRated
         </section>
 
         {/* Categories */}
-        <div style={{ marginTop: "-80px", position: "relative", zIndex: 20, paddingBottom: "100px" }}>
+        <div style={{ marginTop: "0", position: "relative", zIndex: 20, paddingBottom: "100px" }}>
           {continueWatching.length > 0 && (
             <ContentRow title="Continue Watching" items={continueWatching} />
           )}

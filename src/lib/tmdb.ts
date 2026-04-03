@@ -146,3 +146,10 @@ export async function getTvDetails(id: string | number): Promise<any> {
   const data = await fetchTMDB(`/tv/${id}`);
   return data;
 }
+
+export async function searchMedia(query: string, type: "movie" | "tv" | "multi" = "multi"): Promise<MediaItem[]> {
+  const data = await fetchTMDB(`/search/${type}?query=${encodeURIComponent(query)}`);
+  return (data.results || [])
+    .filter((item: any) => item.poster_path) // Filter out items without posters for a better UI
+    .map((item: any) => normalizeMediaItem(item, type === "multi" ? undefined : type));
+}
