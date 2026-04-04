@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { getTrendingMovies, getTopRatedTV } from "@/lib/tmdb";
 import SearchClient from "./SearchClient";
 import Sidebar from "@/components/Sidebar";
@@ -17,10 +18,16 @@ export default async function SearchPage() {
     <div className="flex">
       <Sidebar />
       <main className="main-content flex-1">
-        <SearchClient 
-          trendingMovies={trendingMovies} 
-          trendingTV={trendingTV} 
-        />
+        <Suspense fallback={
+          <div className="flex items-center justify-center min-h-[400px]">
+            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
+          <SearchClient 
+            trendingMovies={trendingMovies} 
+            trendingTV={trendingTV} 
+          />
+        </Suspense>
       </main>
     </div>
   );
