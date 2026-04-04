@@ -2,8 +2,11 @@
  
 import { MediaItem } from "@/lib/tmdb";
 import Image from "next/image";
-import { Play, Star, Plus } from "lucide-react";
+import { Play, Star, Plus, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+import { useEffect, useState } from "react";
+import { getMovieQuality } from "@/lib/scraper";
  
 interface PosterCardProps {
   item: MediaItem;
@@ -11,6 +14,82 @@ interface PosterCardProps {
 }
  
 const PosterCard: React.FC<PosterCardProps> = ({ item, priority = false }) => {
+  const [isWatched, setIsWatched] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [quality, setQuality] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkWatchedStatus = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.user) return;
+
+      const { data, error } = await supabase
+        .from('completed_watch_history')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .eq('media_id', item.id)
+        .maybeSingle();
+
+      if (data && !error) {
+        setIsWatched(true);
+      }
+    };
+
+    const fetchQuality = async () => {
+      const isMovie = item.media_type === "movie" || (!!item.title && item.media_type !== "tv");
+      if (!isMovie) return;
+      
+      const q = await getMovieQuality(item.id);
+      if (q && q !== "Unknown") {
+        setQuality(q.toUpperCase());
+      }
+    };
+
+    checkWatchedStatus();
+    fetchQuality();
+  }, [item.id, item.media_type]);
+
+  const handleToggleWatched = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (!session?.user) {
+      alert("Please log in to track your viewing history!");
+      setLoading(false);
+      return;
+    }
+
+    if (isWatched) {
+      // Remove from history
+      const { error } = await supabase
+        .from('completed_watch_history')
+        .delete()
+        .eq('user_id', session.user.id)
+        .eq('media_id', item.id);
+      
+      if (!error) setIsWatched(false);
+    } else {
+      // Add to history
+      const { error } = await supabase
+        .from('completed_watch_history')
+        .insert({
+          user_id: session.user.id,
+          media_id: item.id,
+          media_type: item.media_type || (item.title ? 'movie' : 'tv'),
+          title: item.title,
+          poster_path: item.poster_path,
+          times_watched: 1,
+          updated_at: new Date().toISOString()
+        });
+      
+      if (!error) setIsWatched(true);
+    }
+    setLoading(false);
+  };
+
   const imageUrl = item.poster_path 
     ? `https://image.tmdb.org/t/p/w500${item.poster_path}` 
     : "/assets/posters/placeholder.jpg";
@@ -44,10 +123,24 @@ const PosterCard: React.FC<PosterCardProps> = ({ item, priority = false }) => {
            </div>
            
            <div className="flex items-center gap-3">
-             <button className="nav-icon" style={{ padding: "10px", borderRadius: "50%", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)" }}>
-                <Plus size={18} />
-             </button>
-           </div>
+              <button className="nav-icon" style={{ padding: "10px", borderRadius: "50%", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.2)" }}>
+                 <Plus size={18} />
+              </button>
+              <button 
+                onClick={handleToggleWatched}
+                disabled={loading}
+                className="nav-icon" 
+                style={{ 
+                  padding: "10px", 
+                  borderRadius: "50%", 
+                  background: isWatched ? "rgba(16, 185, 129, 0.2)" : "rgba(255,255,255,0.1)", 
+                  border: isWatched ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid rgba(255,255,255,0.2)",
+                  color: isWatched ? "var(--win-green)" : "#fff"
+                }}
+              >
+                 <CheckCircle2 size={18} fill={isWatched ? "currentColor" : "none"} />
+              </button>
+            </div>
         </div>
  
         {item.vote_average && item.vote_average > 0 && (
@@ -71,6 +164,44 @@ const PosterCard: React.FC<PosterCardProps> = ({ item, priority = false }) => {
           }}>
             <Star size={12} fill="currentColor" />
             {item.vote_average.toFixed(1)}
+          </div>
+        )}
+
+        {isWatched && (
+          <div style={{ 
+            position: "absolute", 
+            top: "14px", 
+            right: "14px", 
+            zIndex: 25, 
+            background: "rgba(16, 185, 129, 0.9)", 
+            color: "#fff",
+            padding: "6px", 
+            borderRadius: "50%", 
+            boxShadow: "0 0 20px rgba(16, 185, 129, 0.4)",
+            display: "flex"
+          }}>
+            <CheckCircle2 size={14} fill="currentColor" />
+          </div>
+        )}
+
+        {quality && (
+          <div style={{ 
+            position: "absolute", 
+            bottom: item.progress !== undefined ? "24px" : "14px", 
+            right: "14px", 
+            zIndex: 25, 
+            background: quality === "CAM" || quality === "TS" ? "rgba(234, 179, 8, 0.95)" : "rgba(255, 255, 255, 0.1)", 
+            color: quality === "CAM" || quality === "TS" ? "#000" : "#fff",
+            padding: "4px 10px", 
+            borderRadius: "8px", 
+            fontSize: "10px", 
+            fontWeight: 900,
+            letterSpacing: "0.05em",
+            backdropFilter: "blur(12px)",
+            border: "1px solid rgba(255,255,255,0.1)",
+            boxShadow: "0 4px 15px rgba(0,0,0,0.4)"
+          }}>
+            {quality}
           </div>
         )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   Home, 
   Film, 
@@ -12,30 +12,50 @@ import {
   Trophy,
   History,
   TrendingUp,
-  Monitor,
   User,
-  LogOut
+  LogOut,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
-import { useRef } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import ContentRow from "@/components/ContentRow";
+import Sidebar from "@/components/Sidebar";
 import { MediaItem } from "@/lib/tmdb";
 import { supabase } from "@/lib/supabase";
+import { getMovieQuality } from "@/lib/scraper";
 
 interface HomeClientProps {
   initialRecommendations: MediaItem[];
   featureFlags: Record<string, boolean>;
 }
 
+interface LiveStream {
+  id: string;
+  title: string;
+  sport: string;
+  featured?: boolean;
+  is_featured?: boolean;
+  poster_url?: string;
+  video_url: string;
+}
+
 const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, featureFlags }) => {
-  const [activeTab, setActiveTab] = useState("home");
   const [scrolled, setScrolled] = useState(false);
-  const [featured, setFeatured] = useState<MediaItem | null>(null);
+  const [featuredEvents, setFeaturedEvents] = useState<LiveStream[]>([]);
+  const [currentSlide, setCurrentSlide] = useState(0);
   const [user, setUser] = useState<any>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [continueWatching, setContinueWatching] = useState<MediaItem[]>([]);
+  const [heroQualityMap, setHeroQualityMap] = useState<Record<string, string>>({});
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const slideInterval = useRef<NodeJS.Timeout | null>(null);
+
+  // Combine top 3 recommendations and any featured events for the slider
+  const heroSlides = [
+    ...initialRecommendations.slice(0, 3).map(item => ({ ...item, type: 'media' })),
+    ...featuredEvents.map(event => ({ ...event, type: 'event' }))
+  ];
 
   useEffect(() => {
     const fetchContinueWatching = async (userId: string) => {
@@ -52,7 +72,6 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
         }
 
         if (data) {
-          // Deduplicate logic: only show the latest entry per unique media_id
           const deduped: any[] = [];
           const seenIds = new Set<string | number>();
 
@@ -81,7 +100,6 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
       }
     };
 
-    // 1. Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
@@ -90,7 +108,6 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
       }
     });
 
-    // 2. Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
@@ -101,9 +118,22 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
       }
     });
 
-    if (initialRecommendations.length > 0) {
-      setFeatured(initialRecommendations[0]);
-    }
+    const fetchFeaturedEvents = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('live_streams')
+          .select('*')
+          .eq('is_featured', true);
+        
+        if (data) {
+          setFeaturedEvents(data);
+        }
+      } catch (err) {
+        console.error("Error fetching featured events:", err);
+      }
+    };
+
+    fetchFeaturedEvents();
 
     const handleScroll = () => {
       setScrolled(window.scrollY > 50);
@@ -129,13 +159,38 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
     await supabase.auth.signOut();
   };
 
-  const navItems = [
-    { id: "home", icon: Home, label: "Home" },
-    { id: "movies", icon: Film, label: "Movies" },
-    { id: "tv", icon: Tv, label: "TV Shows" },
-    { id: "live", icon: Trophy, label: "Live", enabled: featureFlags?.web_live_sports_enabled },
-    { id: "history", icon: History, label: "My History" },
-  ];
+  const nextSlide = () => {
+    setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
+  };
+
+  const prevSlide = () => {
+    setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length);
+  };
+
+  useEffect(() => {
+    if (heroSlides.length === 0) return;
+    
+    slideInterval.current = setInterval(() => {
+      nextSlide();
+    }, 8000);
+
+    return () => {
+      if (slideInterval.current) clearInterval(slideInterval.current);
+    };
+  }, [heroSlides.length]);
+
+  useEffect(() => {
+    const fetchHeroQualities = async () => {
+      const mediaSlides = heroSlides.filter(s => s.type === "media");
+      for (const slide of mediaSlides) {
+        const q = await getMovieQuality(slide.id);
+        if (q && q !== "Unknown") {
+          setHeroQualityMap(prev => ({ ...prev, [slide.id]: q.toUpperCase() }));
+        }
+      }
+    };
+    if (heroSlides.length > 0) fetchHeroQualities();
+  }, [initialRecommendations, featuredEvents]);
 
   return (
     <div style={{ minHeight: "100vh", position: "relative" }}>
@@ -146,108 +201,136 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
         <div className="aurora aurora-3" />
       </div>
 
-      {/* Sidebar Navigation */}
-      <aside className="sidebar">
-         <div style={{ 
-           width: "52px", 
-           height: "52px", 
-           background: "linear-gradient(135deg, var(--primary) 0%, #991b1b 100%)", 
-           borderRadius: "16px", 
-           display: "flex", 
-           alignItems: "center", 
-           justifyContent: "center", 
-           fontSize: "1.4rem", 
-           fontWeight: 900, 
-           marginBottom: "48px", 
-           boxShadow: "0 8px 20px var(--primary-glow)",
-           border: "1px solid rgba(255,255,255,0.2)"
-         }}>
-           C
-         </div>
-
-         <nav style={{ display: "flex", flexDirection: "column", gap: "24px", flex: 1 }}>
-           {navItems.filter(item => item.enabled !== false).map((item) => (
-             <button
-               key={item.id}
-               onClick={() => setActiveTab(item.id)}
-               className={`nav-icon ${activeTab === item.id ? "active" : ""}`}
-               title={item.label}
-             >
-               <item.icon size={22} />
-             </button>
-           ))}
-         </nav>
-
-         <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginTop: "auto" }}>
-           <button className="nav-icon" title="Search"><Search size={22} /></button>
-           <button className="nav-icon" title="Settings"><Settings size={22} /></button>
-         </div>
-      </aside>
+      <Sidebar featureFlags={featureFlags} />
 
       {/* Main Content Area */}
       <main className="main-content">
          
-         <section className="hero">
-            {featured ? (
-              <>
-                 <Image 
-                   src={`https://image.tmdb.org/t/p/original${featured.backdrop_path}`} 
-                   alt={featured.title}
-                   fill
-                   className="hero-img"
-                   style={{ objectFit: "cover", opacity: 0.5 }}
-                   priority
-                 />
-                 <div className="hero-overlay-dark" />
-                 <div className="hero-overlay-glass" />
-                 
-                 <div className="hero-content animate-fade-in">
+         <section className="hero-slider">
+            {heroSlides.map((slide, index) => (
+              <div 
+                key={`${slide.type}-${slide.id}`} 
+                className={`hero-slide ${index === currentSlide ? 'active' : ''}`}
+              >
+                <Image 
+                  src={slide.type === 'media' 
+                    ? `https://image.tmdb.org/t/p/original${(slide as MediaItem).backdrop_path}`
+                    : (slide as LiveStream).poster_url || "/assets/images/placeholder.png"
+                  } 
+                  alt={slide.type === 'media' ? (slide as MediaItem).title : (slide as LiveStream).title}
+                  fill
+                  className="hero-img"
+                  style={{ objectFit: "cover", opacity: slide.type === 'event' ? 0.85 : 0.5 }}
+                  priority={index === 0}
+                />
+                
+                {slide.type === 'media' ? (
+                  <>
+                    <div className="hero-overlay-dark" />
+                    <div className="hero-overlay-glass" />
+                  </>
+                ) : (
+                  <div className="hero-overlay-vibrant" />
+                )}
+                
+                <div className="hero-content animate-fade-in">
                     <div className="flex items-center gap-4">
-                       {featured.media_type === 'tv' && (
-                         <div className="badge">
-                           TV SERIES
-                         </div>
-                       )}
-                       <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#fbbf24", fontWeight: 800, fontSize: "14px", letterSpacing: "0.05em" }}>
-                         <TrendingUp size={16} />
-                         <span>RANKED #1 TODAY</span>
-                       </div>
+                      {slide.type === 'media' ? (
+                        <>
+                          {(slide as MediaItem).media_type === 'tv' && (
+                            <div className="badge">
+                              TV SERIES
+                            </div>
+                          )}
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#fbbf24", fontWeight: 800, fontSize: "14px", letterSpacing: "0.05em" }}>
+                            <TrendingUp size={16} />
+                            <span>RANKED #{index + 1} TODAY</span>
+                          </div>
+                          {heroQualityMap[slide.id] && (
+                             <div className="badge" style={{ 
+                               background: heroQualityMap[slide.id] === "CAM" || heroQualityMap[slide.id] === "TS" ? "rgba(234, 179, 8, 0.95)" : "rgba(255, 255, 255, 0.15)",
+                               color: heroQualityMap[slide.id] === "CAM" || heroQualityMap[slide.id] === "TS" ? "#000" : "#fff",
+                               fontWeight: 900
+                             }}>
+                               {heroQualityMap[slide.id]}
+                             </div>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <div className="event-badge-live">
+                            <span className="pulse-red" />
+                            LIVE NOW
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "12px", color: "var(--accent-blue)", fontWeight: 900, letterSpacing: "0.1em", fontSize: "14px" }}>
+                            <Trophy size={20} />
+                            {(slide as LiveStream).sport.toUpperCase()} FEATURED MATCH
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <h1 className="text-7xl font-black" style={{ marginTop: "24px", marginBottom: "24px", maxWidth: "900px" }}>
-                      {featured.title}
+                      {slide.type === 'media' ? (slide as MediaItem).title : (slide as LiveStream).title}
                     </h1>
 
                     <p className="text-lg text-muted line-clamp-3" style={{ maxWidth: "650px", lineHeight: "1.8", color: "rgba(255,255,255,0.7)" }}>
-                      {featured.overview}
+                      {slide.type === 'media' ? (slide as MediaItem).overview : `Experience the excitement of ${(slide as LiveStream).sport} live on Caffeine TV. Watch ${(slide as LiveStream).title} now!`}
                     </p>
 
                     <div className="flex items-center gap-6" style={{ marginTop: "48px" }}>
-                       <Link href={`/title/${featured.media_type || (featured.title ? 'movie' : 'tv')}/${featured.id}`}>
-                         <button className="btn-primary" style={{ padding: "18px 48px", fontSize: "1.1rem", borderRadius: "18px" }}>
-                            <Play fill="currentColor" size={24} />
-                            Watch Now
-                         </button>
-                       </Link>
-                       <Link href={`/title/${featured.media_type || (featured.title ? 'movie' : 'tv')}/${featured.id}`}>
-                         <button className="btn-secondary" style={{ padding: "18px 48px", fontSize: "1.1rem", borderRadius: "18px" }}>
-                            <div className="flex items-center gap-2">
-                               <Info size={24} />
-                               Details
-                            </div>
-                         </button>
-                       </Link>
+                      {slide.type === 'media' ? (
+                        <>
+                          <Link href={`/title/${(slide as MediaItem).media_type || ((slide as MediaItem).title ? 'movie' : 'tv')}/${(slide as MediaItem).id}`}>
+                            <button className="btn-primary" style={{ padding: "18px 48px", fontSize: "1.1rem", borderRadius: "18px" }}>
+                                <Play fill="currentColor" size={24} />
+                                Watch Now
+                            </button>
+                          </Link>
+                          <Link href={`/title/${(slide as MediaItem).media_type || ((slide as MediaItem).title ? 'movie' : 'tv')}/${(slide as MediaItem).id}`}>
+                            <button className="btn-secondary" style={{ padding: "18px 48px", fontSize: "1.1rem", borderRadius: "18px" }}>
+                                <div className="flex items-center gap-2">
+                                  <Info size={24} />
+                                  Details
+                                </div>
+                            </button>
+                          </Link>
+                        </>
+                      ) : (
+                        <Link href={`/stream/${slide.id}`}>
+                          <button className="btn-primary" style={{ padding: "18px 48px", fontSize: "1.1rem", borderRadius: "18px" }}>
+                              <Play fill="currentColor" size={24} />
+                              Watch Event
+                          </button>
+                        </Link>
+                      )}
                     </div>
-                 </div>
-              </>
-            ) : (
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", background: "#0c0c0c", height: "100%", width: "100%" }}>
-                  <Monitor size={64} style={{ opacity: 0.1 }} />
                 </div>
-            )}
+              </div>
+            ))}
+
+            {/* Slider Navigation */}
+            <div className="hero-nav">
+                <button className="hero-arrow-btn prev" onClick={prevSlide}>
+                   <ChevronLeft size={32} />
+                </button>
+                <button className="hero-arrow-btn next" onClick={nextSlide}>
+                   <ChevronRight size={32} />
+                </button>
+                
+                <div className="hero-indicators">
+                  {heroSlides.map((_, i) => (
+                    <div 
+                      key={i} 
+                      className={`hero-dot ${i === currentSlide ? 'active' : ''}`}
+                      onClick={() => setCurrentSlide(i)}
+                    />
+                  ))}
+                </div>
+            </div>
          </section>
 
-         <div style={{ marginTop: "-120px", position: "relative", zIndex: 20, paddingBottom: "100px" }}>
+         <div style={{ position: "relative", zIndex: 20, paddingBottom: "100px", background: "var(--bg-black)" }}>
             {continueWatching.length > 0 && (
               <ContentRow 
                 title="Continue Watching" 
@@ -294,8 +377,6 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
                <Search size={20} />
             </button>
 
-            {/* Username removed from header per request */}
-
             <div className="profile-container" ref={dropdownRef}>
               <button 
                 onClick={() => setIsProfileOpen(!isProfileOpen)}
@@ -318,7 +399,6 @@ const HomeClient: React.FC<HomeClientProps> = ({ initialRecommendations, feature
                       if (!avatar) return "/assets/images/Default_pfp.svg";
                       if (avatar.startsWith("http")) return avatar;
                       if (avatar.includes("/")) return avatar;
-                      // Fallback for ID-based profile pics in assets/images/profiles
                       return `/assets/images/profiles/${avatar}${avatar.includes(".") ? "" : ".png"}`;
                     })()} 
                     alt="Avatar" 

@@ -81,8 +81,28 @@ export async function getTrendingMovies(): Promise<MediaItem[]> {
   return (data.results || []).map((item: any) => normalizeMediaItem(item, "movie"));
 }
 
+export async function getPopularMovies(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/movie/popular");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "movie"));
+}
+
+export async function getTopRatedMovies(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/movie/top_rated");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "movie"));
+}
+
 export async function getTrendingTV(): Promise<MediaItem[]> {
   const data = await fetchTMDB("/trending/tv/day");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "tv"));
+}
+
+export async function getPopularTV(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/tv/popular");
+  return (data.results || []).map((item: any) => normalizeMediaItem(item, "tv"));
+}
+
+export async function getTopRatedTV(): Promise<MediaItem[]> {
+  const data = await fetchTMDB("/tv/top_rated");
   return (data.results || []).map((item: any) => normalizeMediaItem(item, "tv"));
 }
 
@@ -115,4 +135,21 @@ export async function getCollectionDetails(id: string | number): Promise<MediaIt
   if (!data || !data.parts) return [];
   
   return (data.parts || []).map((item: any) => normalizeMediaItem(item, "movie"));
+}
+
+export async function getTvSeason(id: string | number, seasonNumber: number): Promise<any> {
+  const data = await fetchTMDB(`/tv/${id}/season/${seasonNumber}`);
+  return data;
+}
+
+export async function getTvDetails(id: string | number): Promise<any> {
+  const data = await fetchTMDB(`/tv/${id}`);
+  return data;
+}
+
+export async function searchMedia(query: string, type: "movie" | "tv" | "multi" = "multi"): Promise<MediaItem[]> {
+  const data = await fetchTMDB(`/search/${type}?query=${encodeURIComponent(query)}`);
+  return (data.results || [])
+    .filter((item: any) => item.poster_path) // Filter out items without posters for a better UI
+    .map((item: any) => normalizeMediaItem(item, type === "multi" ? undefined : type));
 }

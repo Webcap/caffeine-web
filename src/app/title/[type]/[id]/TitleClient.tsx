@@ -20,6 +20,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
+import VideoPlayer from "@/components/VideoPlayer";
+import { getMovieQuality } from "@/lib/scraper";
 
 interface TitleClientProps {
   details: MediaItem;
@@ -30,27 +32,74 @@ interface TitleClientProps {
 const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, collection = [] }) => {
   const router = useRouter();
   const [watchHistory, setWatchHistory] = useState<{ timesWatched: number, lastWatchedAt: string | null } | null>(null);
+  const [showPlayer, setShowPlayer] = useState(false);
+  const [quality, setQuality] = useState<string | null>(null);
   
+  const fetchWatchHistory = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+
+    const { data: history } = await supabase
+      .from('completed_watch_history')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .eq('media_id', details.id);
+
+    if (history && history.length > 0) {
+      const totalTimes = history.reduce((acc: number, curr: any) => acc + (curr.times_watched || 0), 0);
+      const latestTime = new Date(Math.max(...history.map((h: any) => new Date(h.updated_at).getTime()))).toISOString();
+      setWatchHistory({ timesWatched: totalTimes, lastWatchedAt: latestTime });
+    } else {
+      setWatchHistory(null);
+    }
+  };
+
   useEffect(() => {
-    const fetchWatchHistory = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.user) return;
-
-      const { data: history } = await supabase
-        .from('completed_watch_history')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .eq('media_id', details.id);
-
-      if (history && history.length > 0) {
-        const totalTimes = history.reduce((acc: number, curr: any) => acc + (curr.times_watched || 0), 0);
-        const latestTime = new Date(Math.max(...history.map((h: any) => new Date(h.updated_at).getTime()))).toISOString();
-        setWatchHistory({ timesWatched: totalTimes, lastWatchedAt: latestTime });
+    fetchWatchHistory();
+    
+    const fetchQuality = async () => {
+      if (details.media_type === "tv") return;
+      const q = await getMovieQuality(details.id);
+      if (q && q !== "Unknown") {
+        setQuality(q.toUpperCase());
       }
     };
-
-    fetchWatchHistory();
+    fetchQuality();
   }, [details.id, details.media_type, details.title]);
+
+  const handleToggleWatched = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) {
+      alert("Please log in to track your viewing history!");
+      return;
+    }
+
+    if (watchHistory && watchHistory.timesWatched > 0) {
+      // Remove all records for this item to 'unmark' it
+      const { error } = await supabase
+        .from('completed_watch_history')
+        .delete()
+        .eq('user_id', session.user.id)
+        .eq('media_id', details.id);
+      
+      if (!error) fetchWatchHistory();
+    } else {
+      // Add a new record
+      const { error } = await supabase
+        .from('completed_watch_history')
+        .insert({
+          user_id: session.user.id,
+          media_id: details.id,
+          media_type: details.media_type || (details.title ? 'movie' : 'tv'),
+          title: details.title,
+          poster_path: details.poster_path,
+          times_watched: 1,
+          updated_at: new Date().toISOString()
+        });
+      
+      if (!error) fetchWatchHistory();
+    }
+  };
   
   const backdropUrl = details.backdrop_path 
     ? `https://image.tmdb.org/t/p/original${details.backdrop_path}` 
@@ -132,7 +181,8 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
                    alt={details.title}
                    width={350}
                    height={525}
-                   style={{ objectFit: "cover", width: "100%", display: "block" }}
+                   style={{ objectFit: "cover", width: "100%", height: "auto", display: "block" }}
+                   priority
                  />
               </div>
            </div>
@@ -141,6 +191,15 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
            <div className="animate-fade-in" style={{ flex: 1, paddingTop: "80px" }}>
               <div className="flex items-center gap-4">
                  <div className="badge">{details.media_type?.toUpperCase()}</div>
+                 {quality && (
+                   <div className="badge" style={{ 
+                     background: quality === "CAM" || quality === "TS" ? "rgba(234, 179, 8, 0.95)" : "rgba(255, 255, 255, 0.15)",
+                     color: quality === "CAM" || quality === "TS" ? "#000" : "#fff",
+                     fontWeight: 900
+                   }}>
+                     {quality}
+                   </div>
+                 )}
                  {details.genres?.map((genre, i) => (
                    <span key={i} style={{ color: "rgba(255,255,255,0.6)", fontSize: "0.9rem", fontWeight: 600 }}>
                      {genre}
@@ -216,12 +275,28 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
               </div>
 
               <div className="flex items-center gap-6">
-                 <button className="btn-primary" style={{ padding: "20px 60px", fontSize: "1.2rem", borderRadius: "20px" }}>
+                 <button 
+                  onClick={() => setShowPlayer(true)}
+                  className="btn-primary" 
+                  style={{ padding: "20px 60px", fontSize: "1.2rem", borderRadius: "20px" }}
+                >
                     <Play size={24} fill="currentColor" />
                     Watch Now
                  </button>
-                 <button className="btn-secondary" style={{ padding: "20px 32px", borderRadius: "20px" }}>
+                  <button className="btn-secondary" style={{ padding: "20px 32px", borderRadius: "20px" }}>
                     <BookmarkPlus size={24} />
+                 </button>
+                 <button 
+                  onClick={handleToggleWatched}
+                  className="btn-secondary" 
+                  style={{ 
+                    padding: "20px 32px", 
+                    borderRadius: "20px",
+                    background: (watchHistory?.timesWatched || 0) > 0 ? "rgba(16, 185, 129, 0.2)" : "rgba(255,255,255,0.05)",
+                    border: (watchHistory?.timesWatched || 0) > 0 ? "1px solid rgba(16, 185, 129, 0.4)" : "1px solid var(--glass-border)",
+                    color: (watchHistory?.timesWatched || 0) > 0 ? "var(--win-green)" : "#fff"
+                  }}>
+                    <CheckCircle2 size={24} fill={(watchHistory?.timesWatched || 0) > 0 ? "currentColor" : "none"} />
                  </button>
                  <button className="btn-secondary" style={{ padding: "20px 32px", borderRadius: "20px" }}>
                     <Share2 size={24} />
@@ -250,6 +325,18 @@ const TitleClient: React.FC<TitleClientProps> = ({ details, recommendations, col
           </div>
         )}
       </main>
+
+      {/* Video Player Modal */}
+      {showPlayer && (
+        <VideoPlayer 
+          id={details.id}
+          type={details.media_type === "tv" ? "tv" : "movie"}
+          title={details.title}
+          releaseDate={details.release_date}
+          backdropPath={details.backdrop_path}
+          onClose={() => setShowPlayer(false)}
+        />
+      )}
     </div>
   );
 };

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Sidebar from "@/components/Sidebar";
 
 interface Stream {
   id: string;
@@ -62,6 +63,8 @@ interface LiveClientProps {
 const normalize = (s: string | undefined | null) => {
   if (!s) return "";
   let n = s.toLowerCase();
+  // Clean up common team suffix/prefix noise
+  n = n.replace(/\b(?:chicago|minnesota|kansas city|toronto|new york|los angeles|st\.? louis|san francisco)\b/gi, "");
   // Strip sport prefixes (e.g., "NHL: ", "NBA - ")
   n = n.replace(/^(?:nhl|nba|mlb|nfl|ufc|mma|soccer|football|basketball|hockey)[:\s-]+/, "");
   // Strip common stream noise
@@ -231,13 +234,18 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
     const currentMatch = findMatchForStream(stream, scoreboards);
     const state = currentMatch?.status?.type?.state;
     
+    // 1. Immediately hide if definitely finished
     if (isTerminalState(state)) return false;
 
     if (!currentMatch) {
       const streamDate = new Date(stream.createdAt || (stream.timestamp ? stream.timestamp * 1000 : Date.now()));
       const diffHours = (Date.now() - streamDate.getTime()) / (1000 * 60 * 60);
-      // Aggressive 6h fallback for unknown streams (was 24h)
-      if (diffHours > 6) return false;
+      
+      // 2. Aggressive fallback for streams with NO scoreboard match
+      // If it's been active for more than 3 hours and we can't find it on ESPN, it's likely over or an error
+      if (diffHours > 3) return false;
+      
+      // 3. Fallback: If it's literally JUST started or upcoming but we have no data, keep it
     } else {
       const s = state?.toLowerCase() || "";
       const isLive = s === "in" || s.includes("status_in") || s.includes("halftime") || s.includes("period");
@@ -252,8 +260,9 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
         const score1 = parseInt(competitors[0]?.score || "0");
         const score2 = parseInt(competitors[1]?.score || "0");
 
-        // Only hide if it's way past start time AND still 0-0 AND NOT explicitly "in progress"
-        if (diffHours > 8 && score1 === 0 && score2 === 0 && !isLive) return false;
+        // 4. Hide if it's way past start time AND still 0-0 AND NOT explicitly "in progress"
+        // Most MLB/NBA games don't stay 0-0 for 4+ hours after kickoff.
+        if (diffHours > 4 && score1 === 0 && score2 === 0 && !isLive) return false;
       }
     }
     return true;
@@ -266,42 +275,11 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
       color: "#fff",
       display: "flex"
     }}>
-      {/* Vertical Sidebar */}
-      <aside style={{ 
-        width: "100px", 
-        height: "100vh", 
-        position: "fixed", 
-        left: 0, 
-        top: 0,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        padding: "40px 0",
-        borderRight: "1px solid var(--glass-border)",
-        background: "rgba(255,255,255,0.01)",
-        zIndex: 100
-      }}>
-        <a href="/" style={{ textDecoration: "none", color: "inherit", marginBottom: "30px" }}>
-          <div className="sidebar-icon" title="Return Home">
-            <span style={{ fontSize: "1.2rem" }}>🏠</span>
-          </div>
-        </a>
-        <div className="sidebar-icon active" style={{ marginBottom: "40px" }}>
-          <span style={{ fontSize: "1.2rem" }}>📊</span>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          {["📅", "🏆", "📈", "⚙️"].map((icon, i) => (
-            <div key={i} className="sidebar-icon">{icon}</div>
-          ))}
-        </div>
-        <div style={{ marginTop: "auto" }}>
-          <div className="sidebar-icon">👤</div>
-        </div>
-      </aside>
+      <Sidebar />
 
       {/* Main Container */}
       <div style={{ 
-        marginLeft: "100px", 
+        marginLeft: "96px", 
         flex: 1, 
         padding: "40px 60px"
       }}>
@@ -638,14 +616,14 @@ export default function LiveClient({ initialStreams, initialScoreboards }: LiveC
                           t2Score = isLiveOrDone ? (isNaN(sc2) ? "0" : Math.max(0, sc2).toString()) : "0";
                         } 
 
-                        const statusDetail = currentMatch?.status?.type?.detail || "LiveNow";
+                        const statusDetail = currentMatch?.status?.type?.detail || "Scheduled";
                         let startTime = currentMatch ? formatTime(currentMatch.date, statusDetail) : formatTime(stream.timestamp ? new Date(stream.timestamp * 1000).toISOString() : undefined);
                         
                         // Prevent confusing "12:00 AM" discovery placeholders when matching fails.
                         // We use a regex to handle different space characters (like narrow non-breaking space)
                         // and case variations that toLocaleTimeString might produce.
-                        if (!currentMatch && /^12:00\s?(AM|PM)$/i.test(startTime.replace(/\s/g, " "))) {
-                          startTime = "Upcoming";
+                        if (!currentMatch && (/^12:00\s?(AM|PM)$/i.test(startTime.replace(/\s/g, " ")) || startTime === "--:--")) {
+                          startTime = "Scheduled";
                         }
 
 
